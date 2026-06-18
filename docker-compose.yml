@@ -1,0 +1,6 @@
+services:
+  forestiq:
+    image: ${DOCKER_REGISTRY-}forestlen
+    build:
+      context: .
+      dockerfile: ForestIQ/Dockerfile

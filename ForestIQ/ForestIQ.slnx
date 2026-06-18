@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/1-Presentation/">
+    <Project Path="ForestIQ/ForestIQ.csproj" />
+  </Folder>
+  <Folder Name="/2-Service/">
+    <Project Path="ForestIQ.Service/ForestIQ.Service.csproj" Id="fabf9e8b-968f-4daf-b6e7-83bde61ee2ec" />
+  </Folder>
+  <Folder Name="/3.Domain/">
+    <Project Path="ForestIQ.Domain/ForestIQ.Domain.csproj" Id="71ac049a-e38d-4a88-b778-96d2a598ea9c" />
+  </Folder>
+  <Folder Name="/4.Infrastructure/">
+    <Project Path="ForestIQ.Infrastructure.Data/ForestIQ.Infrastructure.Data.csproj" Id="2a2e357c-500b-4e7d-ad09-0e981592b298" />
+  </Folder>
+  <Project Path="docker-compose.dcproj">
+    <Build />
+  </Project>
+</Solution>
