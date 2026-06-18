@@ -872,7 +872,6 @@ namespace ForestIQ.Service
                     {
                         _logger.LogWarning("DNS server '{DnsServer}' resolved '{Domain}' to public IPs ({IPs}), which were ignored.", dnsServer, domainName, string.Join(", ", ips.Select(i => i.ToString())));
                     }
-                    }
                 }
                 catch (Exception ex)
                 {
