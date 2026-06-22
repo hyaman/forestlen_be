@@ -23,7 +23,8 @@ namespace ForestIQ.Infrastructure.Data
                 existing.UserName = configuration.UserName;
                 existing.EncryptedPassword = configuration.EncryptedPassword;
                 existing.DnsServersJson = configuration.DnsServersJson;
-                existing.UpdatedAtUtc = DateTime.UtcNow;
+                existing.RemoteHost = configuration.RemoteHost;
+                existing.UpdatedAtUtc = DateTime.Now;
 
                 _dbContext.Entry(existing).State = EntityState.Modified;
             }

@@ -10,6 +10,6 @@ namespace ForestIQ.Domain.DTO
     {
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
-        public AdConfiguration? AdConfiguration { get; set; } = new AdConfiguration();
+        public AdConfiguration? AdConfiguration { get; set; }
     }
 }

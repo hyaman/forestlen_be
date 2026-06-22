@@ -16,14 +16,9 @@ namespace ForestIQ.Controllers
         private readonly IConfigureService _configureService;
         private readonly IUserService _userService;
         private readonly IEncryptionService _encryptionService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(
-            IAdConnectionCache cache,
-            IJwtService jwtService,
-            IPowerShellService powerShellService,
-            IConfigureService configureService,
-            IUserService userService,
-            IEncryptionService encryptionService)
+        public AuthController(IAdConnectionCache cache, IJwtService jwtService, IPowerShellService powerShellService, IConfigureService configureService, IUserService userService, IEncryptionService encryptionService, IConfiguration configuration)
         {
             _cache = cache;
             _jwtService = jwtService;
@@ -31,6 +26,7 @@ namespace ForestIQ.Controllers
             _configureService = configureService;
             _userService = userService;
             _encryptionService = encryptionService;
+            _configuration = configuration;
         }
 
         [HttpPost("login")]
@@ -51,33 +47,19 @@ namespace ForestIQ.Controllers
             // Get Configuration
             var configuration = await _configureService.GetConfigurationAsync();
 
-            if (isSuperAdmin)
+            if (configuration == null || !configuration.Success || configuration.AdConfiguration == null)
             {
-                if (configuration == null || !configuration.Success || configuration.AdConfiguration == null)
+                return Ok(new
                 {
-                    return Ok(new
-                    {
-                        Success = true,
-                        Token = "",
-                        RequireConfiguration = true,
-                        Message = "Super Admin logged in. Active Directory configuration is required.",
-                        Error = null as string,
-                        ConnectedHost = null as string
-                    });
-                }
+                    Success = true,
+                    Token = "",
+                    RequireConfiguration = true,
+                    Message = isSuperAdmin ? "Super Admin logged in. Active Directory configuration is required." : "Configuration Not Found. Please Log in with correct credentials",
+                    Error = null as string,
+                    ConnectedHost = null as string
+                });
             }
-            //else
-            //{
-            //    return Unauthorized(new
-            //    {
-            //        Success = false,
-            //        Token = "",
-            //        RequireConfiguration = false,
-            //        Message = "Invalid credentials.",
-            //        Error = null as string,
-            //        ConnectedHost = null as string
-            //    });
-            //}
+
 
             // 2. Check AdConfiguration Credentials
             var savedPassword = configuration.AdConfiguration?.EncryptedPassword; // ConfigureService already calls Unprotect()
@@ -110,11 +92,13 @@ namespace ForestIQ.Controllers
                 DnsServers = JsonSerializer.Deserialize<List<string>>(configuration.AdConfiguration.DnsServersJson ?? "[]") ?? new List<string>()
             };
 
-            var res = await _powerShellService.ConnectAsync(request);
+            PowerShellExecutionResult? res = null;
+            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
+
+            res = await _powerShellService.ConnectAsync(request);
 
             if (res == null || !res.Success)
             {
-
                 return BadRequest(new
                 {
                     Success = false,
@@ -144,23 +128,14 @@ namespace ForestIQ.Controllers
         }
 
         [HttpPost("discover-hosts")]
-        public async Task<IActionResult> DiscoverHosts([FromBody] LoginRequest loginRequest)
+        public async Task<IActionResult> DiscoverHosts([FromBody] DomainDiscoveryRequest loginRequest)
         {
-
-            var configuration = await _configureService.GetConfigurationAsync();
-
-            if (configuration == null || !configuration.Success)
-            {
-                throw new Exception("Configurations Not Found");
-            }
-
             var request = new PowerShellRequest
             {
-                DomainName = configuration.AdConfiguration?.ForestName ?? "",
+                DomainName = loginRequest.ForestName ?? "",
                 UserName = loginRequest.UserName,
                 Password = loginRequest.Password,
-                RemoteHost = loginRequest.RemoteHost ?? "",
-                DnsServers = JsonSerializer.Deserialize<List<string>>(configuration.AdConfiguration?.DnsServersJson ?? "") ?? new List<string>()
+                DnsServers = new List<string>(loginRequest.DnsServers?.Split(',') ?? new string[0])
             };
 
             if (string.IsNullOrWhiteSpace(request.DomainName))
@@ -170,10 +145,21 @@ namespace ForestIQ.Controllers
 
             var discovery = await _powerShellService.DiscoverHostsAsync(request);
 
-            return Ok(new
+            if (discovery.Hosts != null && discovery.Hosts.Count > 0 && discovery.DomainControllers != null && discovery.DomainControllers.Count > 0)
             {
-                Success = true,
-                StatusCode = 200,
+                return Ok(new
+                {
+                    Success = true,
+                    StatusCode = 200,
+                    Data = discovery.DomainControllers,
+                    Error = discovery.DomainControllerDiscoveryError
+                });
+            }
+
+            return NotFound(new
+            {
+                Success = false,
+                StatusCode = 404,
                 Data = discovery.DomainControllers,
                 Error = discovery.DomainControllerDiscoveryError
             });

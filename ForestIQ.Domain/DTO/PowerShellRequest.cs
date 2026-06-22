@@ -13,7 +13,7 @@ namespace ForestIQ.Domain.DTO
         [Required]
         public string Password { get; init; } = string.Empty;
 
-        public string RemoteHost { get; set; } = string.Empty;
+        public string? RemoteHost { get; set; } = string.Empty;
 
         public string Action { get; set; } = string.Empty;
 

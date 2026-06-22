@@ -11,6 +11,8 @@ $report = [pscustomobject][ordered]@{
     DomainControllers   = @()
     SiteSubnetDCMapping = @()
     DcLocator           = $null
+    TopLevelOUs         = @()
+    SecurityPosture     = $null
     Errors              = @()
     Timings             = [System.Collections.Generic.List[object]]::new()
 }
@@ -194,5 +196,41 @@ try
 }
 catch { $report.Errors += [pscustomobject]@{ Section = 'DcLocator'; Error = $_.Exception.Message } }
 $report.Timings.Add([pscustomobject]@{ Section = 'DcLocator'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
+
+$t0 = Get-Date
+try
+{
+    $domainDN = (Get-ADDomain -Credential $cred -ErrorAction Stop).DistinguishedName
+    $topLevelOUs = @(Get-ADOrganizationalUnit -Filter * -SearchBase $domainDN -SearchScope OneLevel -Credential $cred -ErrorAction Stop)
+    $report.TopLevelOUs = foreach ($ou in $topLevelOUs) {
+        [pscustomobject]@{
+            Name              = $ou.Name
+            DistinguishedName = $ou.DistinguishedName
+        }
+    }
+}
+catch { $report.Errors += [pscustomobject]@{ Section = 'TopLevelOUs'; Error = $_.Exception.Message } }
+$report.Timings.Add([pscustomobject]@{ Section = 'TopLevelOUs'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
+
+$t0 = Get-Date
+try
+{
+    $pwdPolicy = Get-ADDefaultDomainPasswordPolicy -Credential $cred -ErrorAction Stop
+    $recycleBin = Get-ADOptionalFeature -Filter {Name -eq "Recycle Bin Feature"} -Credential $cred -ErrorAction Stop
+    
+    $report.SecurityPosture = [pscustomobject]@{
+        RecycleBinEnabled      = ($recycleBin.EnabledScopes.Count -gt 0)
+        ComplexityEnabled      = $pwdPolicy.ComplexityEnabled
+        MaxPasswordAgeDays     = if ($pwdPolicy.MaxPasswordAge) { $pwdPolicy.MaxPasswordAge.Days } else { $null }
+        MinPasswordAgeDays     = if ($pwdPolicy.MinPasswordAge) { $pwdPolicy.MinPasswordAge.Days } else { $null }
+        MinPasswordLength      = $pwdPolicy.MinPasswordLength
+        PasswordHistoryCount   = $pwdPolicy.PasswordHistoryCount
+        LockoutDurationMins    = if ($pwdPolicy.LockoutDuration) { $pwdPolicy.LockoutDuration.TotalMinutes } else { $null }
+        LockoutObservationMins = if ($pwdPolicy.LockoutObservationWindow) { $pwdPolicy.LockoutObservationWindow.TotalMinutes } else { $null }
+        LockoutThreshold       = $pwdPolicy.LockoutThreshold
+    }
+}
+catch { $report.Errors += [pscustomobject]@{ Section = 'SecurityPosture'; Error = $_.Exception.Message } }
+$report.Timings.Add([pscustomobject]@{ Section = 'SecurityPosture'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
 
 $report

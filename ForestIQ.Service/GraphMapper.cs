@@ -30,6 +30,11 @@ namespace ForestIQ.Service
             var replicationPartners = GetArray(root, "ReplicationPartners");
             var replicationFailures = GetArray(root, "ReplicationFailures");
             var replicationConnections = GetArray(root, "ReplicationConnections");
+            var errors = GetArray(root, "Errors");
+            var timings = GetArray(root, "Timings");
+            var dcLocator = GetObject(root, "DcLocator");
+            var topLevelOUs = GetArray(root, "TopLevelOUs");
+            var securityPosture = GetObject(root, "SecurityPosture");
 
             var forestName = GetString(domainForestInfo, "ForestName", "Unknown Forest");
             var rootDomain = GetString(forestInfo, "RootDomain", GetString(domainForestInfo, "DomainName", forestName));
@@ -97,7 +102,6 @@ namespace ForestIQ.Service
                 ParentId = null,
                 Depth = 0,
                 ChildIds = forestChildIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                Coordinates = new { x = 600, y = 50 },
                 Meta = new Dictionary<string, object>
                 {
                     { "functionalLevel", GetString(domainForestInfo, "ForestMode") },
@@ -113,7 +117,16 @@ namespace ForestIQ.Service
                                 { "statusMessage", forestReason }
                             }
                         ) },
-                    { "statusMessage", forestReason }
+                    { "statusMessage", forestReason },
+                    { "schemaMaster", GetString(domainForestInfo, "SchemaMaster") },
+                    { "domainNamingMaster", GetString(domainForestInfo, "DomainNamingMaster") },
+                    { "totalDomainControllers", domainControllers.Count },
+                    { "totalSubnets", subnets.Count },
+                    { "totalUsers", GetInt(domainForestInfo, "UserCount") },
+                    { "totalGroups", GetInt(domainForestInfo, "GroupCount") },
+                    { "activeReplicationFailures", replicationFailures.Count(f => GetString(f, "Status").Equals("Failure Found", StringComparison.OrdinalIgnoreCase)) },
+                    { "scriptErrors", errors.Select(e => new { Section = GetString(e, "Section"), Error = GetString(e, "Error") }) },
+                    { "scriptTimings", timings.Select(t => new { Section = GetString(t, "Section"), ElapsedSeconds = GetDouble(t, "ElapsedSeconds") }) }
                 }
             };
             response.Nodes.Add(forestNode);
@@ -144,7 +157,6 @@ namespace ForestIQ.Service
                     Health = IsOkStatus(status) ? "HEALTHY" : "CRITICAL",
                     ParentId = forestId,
                     Depth = 1,
-                    Coordinates = new { x = domainIndex == 0 ? 400 : 800 + ((domainIndex - 1) * 250), y = 180 },
                     Meta = new Dictionary<string, object>
                     {
                         { "netbiosName", GetString(domain, "NetBIOSName", GuessNetbios(domainName)) },
@@ -164,7 +176,9 @@ namespace ForestIQ.Service
                                 { "schemaMaster", GetString(domainForestInfo, "SchemaMaster") },
                                 { "domainNamingMaster", GetString(domainForestInfo, "DomainNamingMaster") }
                             }
-                        ) }
+                        ) },
+                        { "parentDomain", GetString(domain, "ParentDomain") },
+                        { "childDomains", GetArray(domain, "ChildDomains").Select(s => s.GetString()).Where(s => !string.IsNullOrEmpty(s)) }
                     }
                 };
 
@@ -172,6 +186,39 @@ namespace ForestIQ.Service
                 {
                     domainNode.Meta["userCount"] = GetInt(domainForestInfo, "UserCount");
                     domainNode.Meta["groupCount"] = GetInt(domainForestInfo, "GroupCount");
+                    
+                    if (dcLocator.HasValue)
+                    {
+                        domainNode.Meta["closestDcLocator"] = new
+                        {
+                            domainController = GetString(dcLocator, "DomainController"),
+                            ipAddress = GetString(dcLocator, "Address"),
+                            dcSite = GetString(dcLocator, "DcSiteName"),
+                            clientSite = GetString(dcLocator, "OurSiteName")
+                        };
+                    }
+                    
+                    if (securityPosture.HasValue)
+                    {
+                        domainNode.Meta["securityPosture"] = new
+                        {
+                            recycleBinEnabled = GetBool(securityPosture, "RecycleBinEnabled"),
+                            complexityEnabled = GetBool(securityPosture, "ComplexityEnabled"),
+                            minPasswordLength = GetInt(securityPosture, "MinPasswordLength"),
+                            maxPasswordAgeDays = GetInt(securityPosture, "MaxPasswordAgeDays"),
+                            minPasswordAgeDays = GetInt(securityPosture, "MinPasswordAgeDays"),
+                            passwordHistoryCount = GetInt(securityPosture, "PasswordHistoryCount"),
+                            lockoutThreshold = GetInt(securityPosture, "LockoutThreshold"),
+                            lockoutDurationMins = GetInt(securityPosture, "LockoutDurationMins"),
+                            lockoutObservationMins = GetInt(securityPosture, "LockoutObservationMins")
+                        };
+                    }
+                    
+                    domainNode.Meta["topLevelOUs"] = topLevelOUs.Select(ou => new
+                    {
+                        name = GetString(ou, "Name"),
+                        distinguishedName = GetString(ou, "DistinguishedName")
+                    }).Where(ou => !string.IsNullOrWhiteSpace(ou.name)).ToList();
                 }
 
                 response.Nodes.Add(domainNode);
@@ -191,7 +238,7 @@ namespace ForestIQ.Service
             {
                 var site = sites[i];
                 var siteName = GetString(site, "Name", "Unknown Site");
-                var siteId = $"node-site-{SlugSite(siteName)}";
+                var siteId = $"node-site-{siteName}";
                 var parentDomainId = ResolveSiteDomainId(siteName, domainIdsByName, primaryDomainId, forestId, domainControllers);
                 var siteDcCount = domainControllers.Count(dc => GetString(dc, "Site").Equals(siteName, StringComparison.OrdinalIgnoreCase));
                 var sitePlaceholderCount = placeholderDcs.Count(dc => string.Equals(dc.SiteName, siteName, StringComparison.OrdinalIgnoreCase));
@@ -222,7 +269,6 @@ namespace ForestIQ.Service
                     Health = siteHealth,
                     ParentId = parentDomainId,
                     Depth = 2,
-                    Coordinates = new { x = siteCoordinates[Math.Min(i, siteCoordinates.Length - 1)], y = 320 },
                     Meta = new Dictionary<string, object>
                     {
                         { "dcCount", totalSiteDcCount },
@@ -234,7 +280,7 @@ namespace ForestIQ.Service
 
                 response.Edges.Add(new GraphEdge
                 {
-                    Id = $"edge-site-{SlugSite(siteName)}-dom",
+                    Id = $"edge-site-{siteName}-dom",
                     SourceId = siteId,
                     TargetId = parentDomainId,
                     RelationshipType = "SITE_BELONGS_TO_DOMAIN"
@@ -334,8 +380,6 @@ namespace ForestIQ.Service
                     Health = health,
                     ParentId = siteId ?? domainId,
                     Depth = 3,
-                    Coordinates = new { x = GetDcX(siteId, response.Nodes, siteOrdinal), y = 480 },
-                    RenderHints = new { expanded = false, pinned = false, highlighted = false, onSearchPath = false, selected = false, focused = false },
                     Meta = meta
                 });
 
@@ -446,8 +490,6 @@ namespace ForestIQ.Service
                     Health = "CRITICAL",
                     ParentId = siteId ?? domainId,
                     Depth = 3,
-                    Coordinates = new { x = GetDcX(siteId, response.Nodes, siteOrdinal), y = 480 },
-                    RenderHints = new { expanded = false, pinned = false, highlighted = false, onSearchPath = false, selected = false, focused = false },
                     Meta = meta
                 });
 
@@ -472,13 +514,16 @@ namespace ForestIQ.Service
                 });
             }
 
+
+
             AddSubnetNodesAndEdges(response, subnets, siteIdsByName);
 
             AddReplicationPartnerEdges(response, replicationPartners, replicationConnections, dcIdsByFqdn, dcIdsByName, dcFqdnsById);
             AddReplicationFailureEdges(response, replicationFailures, dcIdsByFqdn, dcFqdnsById);
             AddReplicationConnectionEdges(response, replicationConnections, dcIdsByName, dcFqdnsById);
-            //AddSiteLinkEdges(response, siteLinks, siteIdsByName);
 
+
+            response.GeneratedAt = DateTime.Now;
             return response;
         }
 
@@ -568,8 +613,6 @@ namespace ForestIQ.Service
                     Health = "HEALTHY",
                     ParentId = siteId,
                     Depth = 3,
-                    Coordinates = new { x = GetNodeX(siteNode), y = 620 },
-                    RenderHints = new { expanded = false, pinned = false, highlighted = false, onSearchPath = false, selected = false, focused = false },
                     Meta = new Dictionary<string, object>
                     {
                         { "cidr", cidr },
@@ -735,51 +778,6 @@ namespace ForestIQ.Service
                 });
             }
         }
-
-        //private static void AddSiteLinkEdges(GraphResponse response, List<JsonElement> siteLinks, Dictionary<string, string> siteIdsByName)
-        //{
-        //    foreach (var link in siteLinks)
-        //    {
-        //        var includedArray = GetArray(link, "SitesIncludedArray");
-        //        var sites = includedArray.Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : "")).Where(s => !string.IsNullOrEmpty(s)).ToList();
-                
-        //        if (sites.Count < 2)
-        //        {
-        //            continue;
-        //        }
-
-        //        var status = GetString(link, "Status");
-        //        var cost = GetInt(link, "Cost");
-        //        var interval = GetInt(link, "ReplicationIntervalMinutes");
-        //        var linkName = GetString(link, "SiteLinkName");
-
-        //        for (int i = 0; i < sites.Count; i++)
-        //        {
-        //            for (int j = i + 1; j < sites.Count; j++)
-        //            {
-        //                if (siteIdsByName.TryGetValue(sites[i], out var siteId1) && siteIdsByName.TryGetValue(sites[j], out var siteId2))
-        //                {
-        //                    response.Edges.Add(new GraphEdge
-        //                    {
-        //                        Id = $"edge-sitelink-{SlugDc(linkName)}-{siteId1}-{siteId2}",
-        //                        SourceId = siteId1,
-        //                        TargetId = siteId2,
-        //                        RelationshipType = "SITE_LINK",
-        //                        Style = status.Equals("Healthy", StringComparison.OrdinalIgnoreCase) || status.Equals("Informational", StringComparison.OrdinalIgnoreCase) ? "solid" : "dashed",
-        //                        ReplicationData = new
-        //                        {
-        //                            linkName = linkName,
-        //                            cost = cost,
-        //                            intervalMinutes = interval,
-        //                            status = status,
-        //                            scheduleExists = GetString(link, "ScheduleExistsBool").Equals("True", StringComparison.OrdinalIgnoreCase)
-        //                        }
-        //                    });
-        //                }
-        //            }
-        //        }
-        //    }
-        //}
 
         private static List<object> BuildSiteLinks(string siteName, List<JsonElement> siteLinks)
         {
@@ -1008,29 +1006,6 @@ namespace ForestIQ.Service
             return domainIdsByName.Values.Contains(primaryDomainId) ? primaryDomainId : forestId;
         }
 
-        private static int GetDcX(string? siteId, List<GraphNode> nodes, int siteOrdinal)
-        {
-            var siteX = nodes.FirstOrDefault(node => node.Id == siteId)?.Coordinates;
-            var x = GetCoordinateValue(siteX, "x", 150);
-            return x + (siteOrdinal * 100);
-        }
-
-        private static int GetNodeX(GraphNode? node)
-        {
-            return GetCoordinateValue(node?.Coordinates, "x", 150);
-        }
-
-        private static int GetCoordinateValue(object? coordinates, string property, int fallback)
-        {
-            var value = coordinates?.GetType().GetProperty(property)?.GetValue(coordinates);
-            return value switch
-            {
-                int intValue => intValue,
-                double doubleValue => (int)doubleValue,
-                _ => fallback
-            };
-        }
-
         private static string ExtractDcNameFromPartner(string partnerDn)
         {
             var parts = partnerDn.Split(',');
@@ -1082,16 +1057,6 @@ namespace ForestIQ.Service
         {
             var first = value.Split('.', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? value;
             return Slug(first);
-        }
-
-        private static string SlugSite(string value)
-        {
-            var lower = value.ToLowerInvariant();
-            if (lower.Contains("hq")) return "hq";
-            if (lower.Contains("syd")) return "syd";
-            if (lower.Contains("mel")) return "mel";
-            if (lower.Contains("uk")) return "ukpartner";
-            return Slug(value);
         }
 
         private static string SlugDc(string value)
@@ -1158,14 +1123,6 @@ namespace ForestIQ.Service
         private static bool IsOkStatus(string status)
         {
             return string.IsNullOrWhiteSpace(status) || status.Equals("OK", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private class ReferencedDc
-        {
-            public string Name { get; set; } = string.Empty;
-            public string Fqdn { get; set; } = string.Empty;
-            public string SiteName { get; set; } = string.Empty;
-            public string Source { get; set; } = string.Empty;
         }
 
         private static List<ReferencedDc> GetReferencedDcs(JsonElement? forestInfo, JsonElement? repadminSummary, List<JsonElement> replicationFailures, List<JsonElement> replicationPartners, List<JsonElement> configurationServers)

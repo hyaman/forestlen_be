@@ -1,5 +1,6 @@
 using ForestIQ.Domain.DTO;
 using ForestIQ.Domain.Interface;
+using ForestIQ.Service;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ForestIQ.Controllers
@@ -9,10 +10,14 @@ namespace ForestIQ.Controllers
     public class ConfigureController : ControllerBase
     {
         private readonly IConfigureService _configureService;
+        private readonly IAdConnectionCache _cache;
+        private readonly IPowerShellService _powerShellService;
 
-        public ConfigureController(IConfigureService configureService)
+        public ConfigureController(IConfigureService configureService, IAdConnectionCache cache, IPowerShellService powerShellService)
         {
             _configureService = configureService;
+            _cache = cache;
+            _powerShellService = powerShellService;
         }
 
         [HttpPost]
@@ -40,10 +45,10 @@ namespace ForestIQ.Controllers
                 return BadRequest(response);
             }
 
-            if (response.AdConfiguration != null)
-            {
-                response.AdConfiguration.EncryptedPassword = "";
-            }
+            //if (response.AdConfiguration != null)
+            //{
+            //    response.AdConfiguration.EncryptedPassword = "";
+            //}
 
             return Ok(response);
         }
@@ -58,6 +63,16 @@ namespace ForestIQ.Controllers
             {
                 return BadRequest(response);
             }
+
+            var connectionId = User.FindFirst("connectionId")?.Value;
+
+            if (!string.IsNullOrWhiteSpace(connectionId))
+            {
+                _cache.Remove(connectionId);
+            }
+
+            _powerShellService.ClearCache();
+
             return Ok(response);
         }
     }

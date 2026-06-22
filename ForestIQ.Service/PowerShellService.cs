@@ -33,6 +33,7 @@ namespace ForestIQ.Service
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IKerberosService _kerberosService;
         private readonly IConfigureService _configureService;
+        private readonly IConfiguration _configuration;
 
         public PowerShellService(
             ILogger<PowerShellService> logger,
@@ -41,7 +42,8 @@ namespace ForestIQ.Service
             IEncryptionService encryptionService,
             IHttpContextAccessor httpContextAccessor,
             IKerberosService kerberosService,
-            IConfigureService configureService)
+            IConfigureService configureService,
+            IConfiguration configuration)
         {
             _logger = logger;
             _cache = cache;
@@ -50,6 +52,7 @@ namespace ForestIQ.Service
             _httpContextAccessor = httpContextAccessor;
             _kerberosService = kerberosService;
             _configureService = configureService;
+            _configuration = configuration;
         }
 
         public async Task<PowerShellExecutionResult> ConnectAsync(PowerShellRequest request)
@@ -135,7 +138,7 @@ namespace ForestIQ.Service
             }
 
             var connectionErrors = new List<string>();
-
+            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
             foreach (var host in hostsToTry)
             {
                 _logger.LogInformation(
@@ -146,7 +149,18 @@ namespace ForestIQ.Service
 
                 request.RemoteHost = host;
 
-                var result = await ExecutePowerShellAsync(request, GetConnectionScript(), "connect");
+                var result = new PowerShellExecutionResult();
+
+
+                if (!isDebug)
+                {
+                    result = await ExecutePowerShellAsync(request, GetConnectionScript(), "connect");
+                }
+                else
+                {
+                    result.Success = true ;
+                }
+
 
                 _logger.LogInformation("Connect Step 4 Result for {Host}: WinRM Execute Success = {Success} | Error: {Error} | Message: {Message}", host, result.Success, result.Error ?? "None", result.Message ?? "None");
 
@@ -556,7 +570,9 @@ namespace ForestIQ.Service
             }
 
             _logger.LogInformation("Discover Step 1: Configuring Container DNS...");
+           
             var dnsSetupResult = await ConfigureContainerDnsAsync(request);
+           
             _logger.LogInformation("Discover Step 1 Result: {Success} (Status: {StatusCode}) | Error: {Error}", dnsSetupResult.Success, dnsSetupResult.StatusCode, dnsSetupResult.Error ?? "None");
 
             if (!dnsSetupResult.Success)
@@ -566,7 +582,9 @@ namespace ForestIQ.Service
             }
 
             _logger.LogInformation("Discover Step 2: Running AD DNS Discovery for domain {Domain}...", domainName);
+           
             var hosts = await DiscoverDomainControllerHostsAsync(domainName);
+            
             _logger.LogInformation("Discover Step 2 Result: Found {Count} hosts: {Hosts}", hosts.Count, string.Join(", ", hosts));
 
             if (hosts.Count == 0)
@@ -617,6 +635,7 @@ namespace ForestIQ.Service
             }
 
             var domainControllersResult = await DiscoverForestDomainControllersAsync(request, hosts);
+           
             if (!domainControllersResult.Success)
             {
                 response.DomainControllerDiscoveryError = domainControllersResult.Error;
@@ -997,9 +1016,22 @@ namespace ForestIQ.Service
 
         private async Task<PowerShellExecutionResult> ExecutePowerShellAsync(PowerShellRequest request, string scriptContent, string scriptPrefix, string? command = null)
         {
+            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
+            var saveResponse = _configuration.GetValue<bool>("Debug:SaveScriptResponse", true);
+
+            var dataPath = "/app/data";
+            // For local Windows development without Docker:
+            if (!Directory.Exists(dataPath) && System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            {
+                dataPath = Path.Combine(System.AppContext.BaseDirectory, "data");
+                if (!Directory.Exists(dataPath)) Directory.CreateDirectory(dataPath);
+            }
+
+            var debugFilePath = Path.Combine(dataPath, $"debug_{scriptPrefix}.json");
+
             var remoteHost = request.RemoteHost;
 
-            if (scriptPrefix != "connect")
+            if (scriptPrefix != "connect" && !isDebug)
             {
                 var ticketReady = await EnsureKerberosTicketAsync(request);
                 if (!ticketReady.Success)
@@ -1030,6 +1062,7 @@ namespace ForestIQ.Service
                 process.Start();
 
                 var outputTask = process.StandardOutput.ReadToEndAsync();
+                
                 var errorTask = process.StandardError.ReadToEndAsync();
 
                 await process.WaitForExitAsync();
@@ -1053,6 +1086,23 @@ namespace ForestIQ.Service
                 try
                 {
                     result = JsonSerializer.Deserialize<PowerShellResponse>(output) ?? new PowerShellResponse();
+                    
+                    if (saveResponse)
+                    {
+                        try
+                        {
+                            if (!Directory.Exists(dataPath))
+                            {
+                                Directory.CreateDirectory(dataPath);
+                            }
+                            await File.WriteAllTextAsync(debugFilePath, output);
+                            _logger.LogInformation("Saved debug script response to {File}", debugFilePath);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to save debug script response to {File}", debugFilePath);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {

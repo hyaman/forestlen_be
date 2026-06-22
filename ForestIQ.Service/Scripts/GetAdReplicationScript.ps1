@@ -34,12 +34,20 @@ try
 {
     $replicationReport = [System.Collections.Generic.List[object]]::new()
     $replicationFailures = [System.Collections.Generic.List[object]]::new()
+    $seenEdges = @{}
+
+    $dcSiteLookup = @{}
+    foreach ($d in $dcs) {
+        $short = $d.HostName -replace '\..*',''
+        $dcSiteLookup[$short] = $d.Site
+        $dcSiteLookup[$d.HostName] = $d.Site
+    }
 
     foreach ($dc in $dcs)
     {
         try
         {
-            $replicationData = Get-ADReplicationPartnerMetadata -Target $dc.HostName -Scope Server -Credential $cred -ErrorAction Stop
+            $replicationData = Get-ADReplicationPartnerMetadata -Target $dc.HostName -Scope Server -Partition * -Credential $cred -ErrorAction Stop
             foreach ($rep in $replicationData)
             {
                 $latencyMinutes = if ($rep.LastReplicationSuccess) { [math]::Round(((Get-Date) - $rep.LastReplicationSuccess).TotalMinutes, 0) } else { $null }
@@ -53,32 +61,50 @@ try
                     $sourceDCName = $rep.Partner
                 }
                 
-                $replicationReport.Add([pscustomobject]@{
-                    Domain                       = $dc.Domain
-                    SourceDCName                 = $sourceDCName
-                    SourceDCFullDN               = $rep.Partner
-                    DestinationDC                = $dc.HostName
-                    PartnerType                  = $rep.PartnerType
-                    Partition                    = $rep.Partition
-                    LastReplicationSuccess       = $rep.LastReplicationSuccess
-                    LastReplicationAttempt       = $rep.LastReplicationAttempt
-                    LatencyMinutes               = $latencyMinutes
-                    ConsecutiveFailures          = $rep.ConsecutiveReplicationFailures
-                    LastReplicationResult        = $rep.LastReplicationResult
-                    Health                       = $healthStatus
-                    
-                    SiteName                     = $dc.Site
-                    DomainController             = $dc.HostName
-                    DCIPAddress                  = $dc.IPv4Address
-                    ReplicationPartner           = $rep.Partner
-                    NamingContext                = $rep.Partition
-                    ReplicationLatencyMinutes    = $latencyMinutes
-                    ReplicationLatencyHours      = $latencyHours
-                    ReplicationLatencyStatus     = $healthStatus
-                    LastReplicationResultMessage = $rep.LastReplicationResultMessage
-                    ReplicationStatus            = $healthStatus
-                    PartnerStatus                = $healthStatus
-                })
+                $sourceSite = "Unknown"
+                if ($dcSiteLookup.ContainsKey($sourceDCName)) {
+                    $sourceSite = $dcSiteLookup[$sourceDCName]
+                } else {
+                    try {
+                        $sDc = Get-ADDomainController -Identity $sourceDCName -Credential $cred -ErrorAction Stop
+                        $sourceSite = $sDc.Site
+                        $dcSiteLookup[$sourceDCName] = $sourceSite
+                    } catch {}
+                }
+                
+                $edgeKey = "$sourceDCName-$($dc.HostName)"
+                if (-not $seenEdges.ContainsKey($edgeKey)) {
+                    $seenEdges[$edgeKey] = $true
+                    $replicationReport.Add([pscustomobject]@{
+                        Domain                       = $dc.Domain
+                        SourceDCName                 = $sourceDCName
+                        SourceSite                   = $sourceSite
+                        SourceDCFullDN               = $rep.Partner
+                        DestinationDC                = $dc.HostName
+                        DestinationSite              = $dc.Site
+                        IsIntersite                  = ($sourceSite -ne $dc.Site)
+                        PartnerType                  = $rep.PartnerType
+                        Partition                    = $rep.Partition
+                        LastReplicationSuccess       = $rep.LastReplicationSuccess
+                        LastReplicationAttempt       = $rep.LastReplicationAttempt
+                        LatencyMinutes               = $latencyMinutes
+                        ConsecutiveFailures          = $rep.ConsecutiveReplicationFailures
+                        LastReplicationResult        = $rep.LastReplicationResult
+                        Health                       = $healthStatus
+                        
+                        SiteName                     = $dc.Site
+                        DomainController             = $dc.HostName
+                        DCIPAddress                  = $dc.IPv4Address
+                        ReplicationPartner           = $rep.Partner
+                        NamingContext                = $rep.Partition
+                        ReplicationLatencyMinutes    = $latencyMinutes
+                        ReplicationLatencyHours      = $latencyHours
+                        ReplicationLatencyStatus     = $healthStatus
+                        LastReplicationResultMessage = $rep.LastReplicationResultMessage
+                        ReplicationStatus            = $healthStatus
+                        PartnerStatus                = $healthStatus
+                    })
+                }
             }
         }
         catch
@@ -86,10 +112,13 @@ try
             $replicationReport.Add([pscustomobject]@{ 
                 Domain = $dc.Domain
                 DestinationDC = $dc.HostName
+                DestinationSite = $dc.Site
                 SiteName = $dc.Site
                 DomainController = $dc.HostName
                 DCIPAddress = $dc.IPv4Address
                 SourceDCName = 'Unknown'
+                SourceSite = 'Unknown'
+                IsIntersite = $false
                 SourceDCFullDN = 'Unable to collect replication metadata'
                 ReplicationPartner = 'Unable to collect replication metadata'
                 PartnerType = $null

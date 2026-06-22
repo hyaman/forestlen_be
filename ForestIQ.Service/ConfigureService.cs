@@ -15,11 +15,7 @@ namespace ForestIQ.Service
         private readonly IEncryptionService _encryptionService;
         private readonly ILogger<ConfigureService> _logger;
 
-        public ConfigureService(
-            IConfigureRepository repository,
-            IKerberosService kerberosService,
-            IEncryptionService encryptionService,
-            ILogger<ConfigureService> logger)
+        public ConfigureService(IConfigureRepository repository,IKerberosService kerberosService,IEncryptionService encryptionService,ILogger<ConfigureService> logger)
         {
             _repository = repository;
             _kerberosService = kerberosService;

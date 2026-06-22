@@ -29,10 +29,6 @@ namespace ForestIQ.Domain.DTO
 
         public List<string> ChildIds { get; set; } = [];
 
-        public object Coordinates { get; set; } = new { x = 0, y = 0 };
-
-        public object RenderHints { get; set; } = new { expanded = true, pinned = false, highlighted = false, onSearchPath = false, selected = false, focused = false };
-
         public string? ClusterId { get; set; }
 
         public Dictionary<string, object> Meta { get; set; } = [];
@@ -45,9 +41,13 @@ namespace ForestIQ.Domain.DTO
         public string TargetId { get; set; } = string.Empty;
         public string RelationshipType { get; set; } = string.Empty;
         public string Style { get; set; } = "solid";
-        public bool Selected { get; set; } = false;
-        public bool OnSearchPath { get; set; } = false;
-        public bool Visible { get; set; } = true;
         public object? ReplicationData { get; set; }
+    }
+    public class ReferencedDc
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Fqdn { get; set; } = string.Empty;
+        public string SiteName { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
     }
 }

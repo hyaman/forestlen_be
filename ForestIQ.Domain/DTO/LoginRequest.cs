@@ -11,7 +11,12 @@ namespace ForestIQ.Domain.DTO
         public string UserName { get; set; } = string.Empty;
 
         public string Password { get; set; } = string.Empty;
+    }
 
-        public string? RemoteHost { get; set; } = string.Empty;
+    public class DomainDiscoveryRequest : LoginRequest
+    {
+        public string? ForestName { get; set; } = string.Empty;
+
+        public string? DnsServers { get; set; } = string.Empty;
     }
 }

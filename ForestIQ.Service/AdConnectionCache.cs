@@ -10,10 +10,7 @@ namespace ForestIQ.Service
         private readonly IEncryptionService _encryptionService;
         private readonly IKerberosService _kerberosService;
 
-        public AdConnectionCache(
-            IMemoryCache cache,
-            IEncryptionService encryptionService,
-            IKerberosService kerberosService)
+        public AdConnectionCache(IMemoryCache cache,IEncryptionService encryptionService,IKerberosService kerberosService)
         {
             _cache = cache;
             _encryptionService = encryptionService;
@@ -29,11 +26,11 @@ namespace ForestIQ.Service
                 ConnectionId = connectionId,
                 DomainName = request.DomainName,
                 UserName = request.UserName,
-                RemoteHost = request.RemoteHost,
+                RemoteHost = request.RemoteHost ?? "",
                 EncryptedPassword = _encryptionService.Protect(request.Password),
                 KerberosCachePath = kerberosCachePath,
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(1440)
+                CreatedAt = DateTime.Now,
+                ExpiresAt = DateTime.Now.AddMinutes(1440)
             };
 
             _cache.Set(connectionId,connection,TimeSpan.FromMinutes(1440));
