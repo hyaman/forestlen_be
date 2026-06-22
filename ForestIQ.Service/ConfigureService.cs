@@ -60,15 +60,16 @@ namespace ForestIQ.Service
                     };
                 }
 
-                var now = DateTime.UtcNow;
+                
                 var configuration = new AdConfiguration
                 {
                     ForestName = request.ForestName.Trim(),
                     UserName = request.UserName.Trim(),
                     EncryptedPassword = _encryptionService.Protect(request.Password),
                     DnsServersJson = JsonSerializer.Serialize(dnsServers),
-                    CreatedAtUtc = now,
-                    UpdatedAtUtc = now
+                    RemoteHost = request.RemoteHost?.Trim(),
+                    UpdatedAtUtc = DateTime.Now,
+                    CreatedAtUtc = DateTime.Now
                 };
 
                 var id = await _repository.UpsertAsync(configuration);
@@ -127,6 +128,7 @@ namespace ForestIQ.Service
                         UserName = configuration.UserName,
                         EncryptedPassword = _encryptionService.Unprotect(configuration.EncryptedPassword),
                         DnsServersJson = configuration.DnsServersJson,
+                        RemoteHost = configuration.RemoteHost,
                         CreatedAtUtc = configuration.CreatedAtUtc,
                         UpdatedAtUtc = configuration.UpdatedAtUtc
                     }

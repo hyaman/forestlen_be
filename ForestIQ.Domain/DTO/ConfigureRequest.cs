@@ -14,5 +14,7 @@ namespace ForestIQ.Domain.DTO
         public string Password { get; init; } = string.Empty;
 
         public string? DnsServer { get; init; }
+
+        public string? RemoteHost { get; init; }
     }
 }

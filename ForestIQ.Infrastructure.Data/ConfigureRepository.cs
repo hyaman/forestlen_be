@@ -15,16 +15,17 @@ namespace ForestIQ.Infrastructure.Data
 
         public async Task<long> UpsertAsync(AdConfiguration configuration)
         {
-            var existing = await _dbContext.AdConfigurations
-                .FirstOrDefaultAsync(c => c.ForestName == configuration.ForestName);
+            var existing = await _dbContext.AdConfigurations.FirstOrDefaultAsync();
 
             if (existing != null)
             {
+                existing.ForestName = configuration.ForestName;
                 existing.UserName = configuration.UserName;
                 existing.EncryptedPassword = configuration.EncryptedPassword;
                 existing.DnsServersJson = configuration.DnsServersJson;
-                existing.UpdatedAtUtc = configuration.UpdatedAtUtc;
-                _dbContext.AdConfigurations.Update(existing);
+                existing.UpdatedAtUtc = DateTime.UtcNow;
+
+                _dbContext.Entry(existing).State = EntityState.Modified;
             }
             else
             {

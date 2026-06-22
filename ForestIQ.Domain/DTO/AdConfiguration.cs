@@ -12,8 +12,10 @@ namespace ForestIQ.Domain.DTO
 
         public string DnsServersJson { get; set; } = "[]";
 
-        public DateTime CreatedAtUtc { get; set; }
+        public string? RemoteHost { get; set; }
 
-        public DateTime UpdatedAtUtc { get; set; }
+        public DateTime? CreatedAtUtc { get; set; }
+
+        public DateTime? UpdatedAtUtc { get; set; } = DateTime.Now;
     }
 }

@@ -10,6 +10,7 @@ namespace ForestIQ.Infrastructure.Data
         }
 
         public DbSet<AdConfiguration> AdConfigurations { get; set; }
+        public DbSet<User> Users { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -22,10 +23,20 @@ namespace ForestIQ.Infrastructure.Data
 
                 entity.Property(e => e.ForestName).IsRequired();
                 entity.Property(e => e.UserName).IsRequired();
+                entity.Property(e => e.RemoteHost);
                 entity.Property(e => e.EncryptedPassword).IsRequired();
                 entity.Property(e => e.DnsServersJson).IsRequired();
                 entity.Property(e => e.CreatedAtUtc).IsRequired();
                 entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            });
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.Email).IsUnique();
+
+                entity.Property(e => e.Email).IsRequired();
+                entity.Property(e => e.EncryptedPassword).IsRequired();
+                entity.Property(e => e.Role).IsRequired();
             });
         }
     }

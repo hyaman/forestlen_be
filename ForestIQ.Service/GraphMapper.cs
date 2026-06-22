@@ -29,6 +29,7 @@ namespace ForestIQ.Service
             var repadminSummary = GetObject(root, "RepadminSummary");
             var replicationPartners = GetArray(root, "ReplicationPartners");
             var replicationFailures = GetArray(root, "ReplicationFailures");
+            var replicationConnections = GetArray(root, "ReplicationConnections");
 
             var forestName = GetString(domainForestInfo, "ForestName", "Unknown Forest");
             var rootDomain = GetString(forestInfo, "RootDomain", GetString(domainForestInfo, "DomainName", forestName));
@@ -49,6 +50,14 @@ namespace ForestIQ.Service
             var placeholderDcs = referencedDcs.Where(refDc => !domainControllers.Any(dc => 
                 GetString(dc, "Name", GetString(dc, "HostName")).Equals(refDc.Name, StringComparison.OrdinalIgnoreCase) || 
                 GetString(dc, "HostName").StartsWith(refDc.Name + ".", StringComparison.OrdinalIgnoreCase))).ToList();
+
+            var forestDomains = GetArray(forestInfo, "Domains");
+            var isDomainFiltered = forestDomains.Count > 0 && domains.Count < forestDomains.Count;
+
+            if (isDomainFiltered)
+            {
+                placeholderDcs.Clear();
+            }
 
             var domainElements = domains.Count > 0
                 ? domains
@@ -183,10 +192,15 @@ namespace ForestIQ.Service
                 var site = sites[i];
                 var siteName = GetString(site, "Name", "Unknown Site");
                 var siteId = $"node-site-{SlugSite(siteName)}";
-                var parentDomainId = ResolveSiteDomainId(siteName, domainIdsByName, primaryDomainId);
+                var parentDomainId = ResolveSiteDomainId(siteName, domainIdsByName, primaryDomainId, forestId, domainControllers);
                 var siteDcCount = domainControllers.Count(dc => GetString(dc, "Site").Equals(siteName, StringComparison.OrdinalIgnoreCase));
-                var sitePlaceholderCount = placeholderDcs.Count(dc => dc.SiteName.Equals(siteName, StringComparison.OrdinalIgnoreCase));
+                var sitePlaceholderCount = placeholderDcs.Count(dc => string.Equals(dc.SiteName, siteName, StringComparison.OrdinalIgnoreCase));
                 var totalSiteDcCount = siteDcCount + sitePlaceholderCount;
+                
+                if (isDomainFiltered && totalSiteDcCount == 0)
+                {
+                    continue;
+                }
                 
                 var subnetCidrs = subnets
                     .Where(subnet => NormalizeSiteName(GetString(subnet, "Site")).Equals(siteName, StringComparison.OrdinalIgnoreCase))
@@ -246,7 +260,7 @@ namespace ForestIQ.Service
                 
                 if (siteId == null) continue;
 
-                var domainId = ResolveDcDomainId(fqdn, domainIdsByName, primaryDomainId);
+                var domainId = ResolveDcDomainId(fqdn, domainIdsByName, primaryDomainId, forestId);
                 var dcId = $"node-dc-{SlugDc(dcName)}";
                 var siteOrdinal = dcIndexBySite.GetValueOrDefault(siteName);
                 dcIndexBySite[siteName] = siteOrdinal + 1;
@@ -362,7 +376,7 @@ namespace ForestIQ.Service
                 
                 if (siteId == null) continue;
 
-                var domainId = ResolveDcDomainId(fqdn, domainIdsByName, primaryDomainId);
+                var domainId = ResolveDcDomainId(fqdn, domainIdsByName, primaryDomainId, forestId);
                 var dcId = $"node-dc-{SlugDc(refDc.Name)}";
                 var siteOrdinal = string.IsNullOrWhiteSpace(siteName) ? 0 : dcIndexBySite.GetValueOrDefault(siteName);
                 if (!string.IsNullOrWhiteSpace(siteName))
@@ -460,10 +474,69 @@ namespace ForestIQ.Service
 
             AddSubnetNodesAndEdges(response, subnets, siteIdsByName);
 
-            AddReplicationPartnerEdges(response, replicationPartners, dcIdsByFqdn, dcIdsByName, dcFqdnsById);
+            AddReplicationPartnerEdges(response, replicationPartners, replicationConnections, dcIdsByFqdn, dcIdsByName, dcFqdnsById);
             AddReplicationFailureEdges(response, replicationFailures, dcIdsByFqdn, dcFqdnsById);
+            AddReplicationConnectionEdges(response, replicationConnections, dcIdsByName, dcFqdnsById);
+            //AddSiteLinkEdges(response, siteLinks, siteIdsByName);
 
             return response;
+        }
+
+        private static void AddReplicationConnectionEdges(GraphResponse response, List<JsonElement> replicationConnections, Dictionary<string, string> dcIdsByName, Dictionary<string, string> dcFqdnsById)
+        {
+            foreach (var conn in replicationConnections)
+            {
+                var sourceDC = GetString(conn, "SourceDC");
+                var targetDC = GetString(conn, "TargetDC");
+
+                if (dcIdsByName.TryGetValue(sourceDC, out var sourceId) && dcIdsByName.TryGetValue(targetDC, out var targetId))
+                {
+                    // If an active replication partner edge already exists between these DCs, don't create a duplicate.
+                    // Note: ReplicationPartner edges are stored as SourceId=DestinationDC, TargetId=SourceDC (PULL direction).
+                    // We align the KCC connections to this same direction to easily deduplicate.
+                    if (response.Edges.Any(e => e.SourceId == targetId && e.TargetId == sourceId && e.RelationshipType == "REPLICATION_LINK"))
+                    {
+                        continue;
+                    }
+
+                    var type = GetString(conn, "ConnectionType");
+                    var status = GetString(conn, "EnabledConnection").Equals("True", StringComparison.OrdinalIgnoreCase) ? "Healthy" : "Disabled";
+                    var name = GetString(conn, "ConnectionName");
+                    var transport = GetString(conn, "TransportProtocol");
+                    
+                    var contextsArray = GetArray(conn, "ReplicatedNamingContexts");
+                    var contexts = contextsArray.Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : "")).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                    
+                    response.Edges.Add(new GraphEdge
+                    {
+                        Id = $"edge-kcc-{SlugDc(name)}-{targetId}-{sourceId}",
+                        SourceId = targetId, // DestinationDC
+                        TargetId = sourceId, // SourceDC
+                        RelationshipType = "REPLICATION_LINK",
+                        Style = status == "Healthy" ? "solid" : "dashed",
+                        ReplicationData = new
+                        {
+                            connectionType = type,
+                            transportProtocol = transport,
+                            status = status == "Healthy" ? "UNKNOWN" : "DISABLED", // Align status values with frontend expectations
+                            name = name,
+                            replicatedNamingContexts = contexts,
+                            created = GetString(conn, "Created"),
+                            modified = GetString(conn, "Modified"),
+                            
+                            latencySeconds = 0,
+                            latencyMinutes = 0,
+                            lastSuccessAt = (string?)null,
+                            lastAttemptAt = (string?)null,
+                            failureCount = 0,
+                            sourceDcFqdn = dcFqdnsById.TryGetValue(targetId, out var srcFqdn) ? srcFqdn : targetDC, // Remember sourceId/targetId were swapped!
+                            targetDcFqdn = dcFqdnsById.TryGetValue(sourceId, out var tgtFqdn) ? tgtFqdn : sourceDC,
+                            errorMessage = (string?)null,
+                            statusMessage = status == "Healthy" ? "Configured in topology, but active replication hasn't occurred yet" : "Topology connection disabled"
+                        }
+                    });
+                }
+            }
         }
 
         private static void AddSubnetNodesAndEdges(
@@ -519,6 +592,7 @@ namespace ForestIQ.Service
         private static void AddReplicationPartnerEdges(
             GraphResponse response,
             List<JsonElement> replicationPartners,
+            List<JsonElement> replicationConnections,
             Dictionary<string, string> dcIdsByFqdn,
             Dictionary<string, string> dcIdsByName,
             Dictionary<string, string> dcFqdnsById)
@@ -541,9 +615,15 @@ namespace ForestIQ.Service
                     continue;
                 }
 
-                var latencyMinutes = GetDouble(partner, "ReplicationLatencyMinutes");
+                var latencyMinutes = GetDouble(partner, "LatencyMinutes");
+                if (latencyMinutes == 0) latencyMinutes = GetDouble(partner, "ReplicationLatencyMinutes"); // fallback
+                
                 var failureCount = GetInt(partner, "ConsecutiveFailures");
-                var status = GetReplicationStatus(latencyMinutes, failureCount, GetString(partner, "ReplicationStatus", GetString(partner, "PartnerStatus")));
+                
+                var rawStatus = GetString(partner, "Health");
+                if (string.IsNullOrWhiteSpace(rawStatus)) rawStatus = GetString(partner, "ReplicationStatus", GetString(partner, "PartnerStatus"));
+                var status = GetReplicationStatus(latencyMinutes, failureCount, rawStatus);
+                
                 var replStatusMessage = status switch
                 {
                     "FAILED" => $"Replication has failed (consecutive failures: {failureCount})",
@@ -556,6 +636,26 @@ namespace ForestIQ.Service
                 var sourceLabel = SlugDc(response.Nodes.FirstOrDefault(node => node.Id == sourceId)?.Label ?? sourceFqdn);
                 var targetLabel = SlugDc(response.Nodes.FirstOrDefault(node => node.Id == targetId)?.Label ?? targetName);
 
+                // Attempt to find the matching KCC connection to merge topology data into this active partner edge.
+                // In ReplicationPartner: Destination is sourceId, Source is targetId.
+                // In ReplicationConnection: TargetDC is Destination, SourceDC is Source.
+                var matchingConnection = replicationConnections.FirstOrDefault(conn =>
+                {
+                    var kccSourceDC = GetString(conn, "SourceDC");
+                    var kccTargetDC = GetString(conn, "TargetDC");
+                    return (dcIdsByName.TryGetValue(kccSourceDC, out var kSourceId) && kSourceId == targetId) &&
+                           (dcIdsByName.TryGetValue(kccTargetDC, out var kTargetId) && kTargetId == sourceId);
+                });
+
+                var connectionType = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "ConnectionType") : "Unknown";
+                var transportProtocol = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "TransportProtocol") : "Unknown";
+                var connName = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "ConnectionName") : "Unknown";
+                var connCreated = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "Created") : null;
+                var connModified = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "Modified") : null;
+                var contexts = matchingConnection.ValueKind != JsonValueKind.Undefined 
+                    ? GetArray(matchingConnection, "ReplicatedNamingContexts").Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : "")).Where(s => !string.IsNullOrEmpty(s)).ToList()
+                    : new List<string>();
+
                 response.Edges.Add(new GraphEdge
                 {
                     Id = $"edge-repl-{sourceLabel}-{targetLabel}",
@@ -565,7 +665,15 @@ namespace ForestIQ.Service
                     Style = GetReplicationStyle(status),
                     ReplicationData = new
                     {
+                        connectionType = connectionType,
+                        transportProtocol = transportProtocol,
+                        name = connName,
+                        replicatedNamingContexts = contexts,
+                        created = connCreated,
+                        modified = connModified,
+
                         latencySeconds = (int)(latencyMinutes * 60),
+                        latencyMinutes = latencyMinutes,
                         lastSuccessAt = GetNullableString(partner, "LastReplicationSuccess"),
                         lastAttemptAt = GetNullableString(partner, "LastReplicationAttempt"),
                         failureCount,
@@ -627,6 +735,51 @@ namespace ForestIQ.Service
                 });
             }
         }
+
+        //private static void AddSiteLinkEdges(GraphResponse response, List<JsonElement> siteLinks, Dictionary<string, string> siteIdsByName)
+        //{
+        //    foreach (var link in siteLinks)
+        //    {
+        //        var includedArray = GetArray(link, "SitesIncludedArray");
+        //        var sites = includedArray.Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : "")).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                
+        //        if (sites.Count < 2)
+        //        {
+        //            continue;
+        //        }
+
+        //        var status = GetString(link, "Status");
+        //        var cost = GetInt(link, "Cost");
+        //        var interval = GetInt(link, "ReplicationIntervalMinutes");
+        //        var linkName = GetString(link, "SiteLinkName");
+
+        //        for (int i = 0; i < sites.Count; i++)
+        //        {
+        //            for (int j = i + 1; j < sites.Count; j++)
+        //            {
+        //                if (siteIdsByName.TryGetValue(sites[i], out var siteId1) && siteIdsByName.TryGetValue(sites[j], out var siteId2))
+        //                {
+        //                    response.Edges.Add(new GraphEdge
+        //                    {
+        //                        Id = $"edge-sitelink-{SlugDc(linkName)}-{siteId1}-{siteId2}",
+        //                        SourceId = siteId1,
+        //                        TargetId = siteId2,
+        //                        RelationshipType = "SITE_LINK",
+        //                        Style = status.Equals("Healthy", StringComparison.OrdinalIgnoreCase) || status.Equals("Informational", StringComparison.OrdinalIgnoreCase) ? "solid" : "dashed",
+        //                        ReplicationData = new
+        //                        {
+        //                            linkName = linkName,
+        //                            cost = cost,
+        //                            intervalMinutes = interval,
+        //                            status = status,
+        //                            scheduleExists = GetString(link, "ScheduleExistsBool").Equals("True", StringComparison.OrdinalIgnoreCase)
+        //                        }
+        //                    });
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
 
         private static List<object> BuildSiteLinks(string siteName, List<JsonElement> siteLinks)
         {
@@ -807,8 +960,26 @@ namespace ForestIQ.Service
                 .ToList();
         }
 
-        private static string ResolveSiteDomainId(string siteName, Dictionary<string, string> domainIdsByName, string primaryDomainId)
+        private static string ResolveSiteDomainId(string siteName, Dictionary<string, string> domainIdsByName, string primaryDomainId, string forestId, List<JsonElement> domainControllers)
         {
+            var siteDcs = domainControllers.Where(dc => GetString(dc, "Site").Equals(siteName, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (siteDcs.Count > 0)
+            {
+                var topDomainHost = siteDcs.Select(dc => GetNullableString(dc, "HostName"))
+                                           .Where(h => !string.IsNullOrEmpty(h) && h.Contains('.'))
+                                           .Select(h => h.Substring(h.IndexOf('.') + 1))
+                                           .GroupBy(d => d)
+                                           .OrderByDescending(g => g.Count())
+                                           .Select(g => g.Key)
+                                           .FirstOrDefault();
+                                           
+                if (!string.IsNullOrEmpty(topDomainHost))
+                {
+                    var matchedDomain = domainIdsByName.Keys.FirstOrDefault(k => string.Equals(k, topDomainHost, StringComparison.OrdinalIgnoreCase));
+                    if (matchedDomain != null) return domainIdsByName[matchedDomain];
+                }
+            }
+
             if (siteName.Contains("uk", StringComparison.OrdinalIgnoreCase))
             {
                 var ukDomain = domainIdsByName.FirstOrDefault(domain => domain.Key.Contains("uk", StringComparison.OrdinalIgnoreCase));
@@ -818,13 +989,23 @@ namespace ForestIQ.Service
                 }
             }
 
-            return primaryDomainId;
+            if (domainIdsByName.Values.Contains(primaryDomainId))
+            {
+                return primaryDomainId;
+            }
+
+            return forestId;
         }
 
-        private static string ResolveDcDomainId(string fqdn, Dictionary<string, string> domainIdsByName, string primaryDomainId)
+        private static string ResolveDcDomainId(string fqdn, Dictionary<string, string> domainIdsByName, string primaryDomainId, string forestId)
         {
             var domainName = GetDomainFromFqdn(fqdn);
-            return domainIdsByName.TryGetValue(domainName, out var domainId) ? domainId : primaryDomainId;
+            if (domainIdsByName.TryGetValue(domainName, out var domainId))
+            {
+                return domainId;
+            }
+            
+            return domainIdsByName.Values.Contains(primaryDomainId) ? primaryDomainId : forestId;
         }
 
         private static int GetDcX(string? siteId, List<GraphNode> nodes, int siteOrdinal)

@@ -4,6 +4,7 @@ $report = [pscustomobject][ordered]@{
     GeneratedAt              = Get-Date
     ReplicationPartners      = @()
     ReplicationFailures      = @()
+    ReplicationConnections   = @()
     RepadminSummary          = $null
     ReplicationHealthSummary = $null
     Errors                   = @()
@@ -20,7 +21,7 @@ try {
     foreach ($domain in $forest.Domains) {
         if ($global:FilterDomain -and ($domain -notmatch $global:FilterDomain)) { continue }
         try {
-            $domainDCs = @(Get-ADDomainController -Filter * -Server $domain -Credential $cred -ErrorAction Stop | Select-Object HostName, Site, IPv4Address)
+            $domainDCs = @(Get-ADDomainController -Filter * -Server $domain -Credential $cred -ErrorAction Stop | Select-Object HostName, Site, IPv4Address, Domain)
             if ($global:FilterSite) { $domainDCs = @($domainDCs | Where-Object { $_.Site -match $global:FilterSite }) }
             if ($null -ne $domainDCs -and $domainDCs.Count -gt 0) { $dcs += $domainDCs }
         } catch { }
@@ -44,22 +45,36 @@ try
                 $latencyMinutes = if ($rep.LastReplicationSuccess) { [math]::Round(((Get-Date) - $rep.LastReplicationSuccess).TotalMinutes, 0) } else { $null }
                 $latencyHours = if ($rep.LastReplicationSuccess) { [math]::Round(((Get-Date) - $rep.LastReplicationSuccess).TotalHours, 2) } else { $null }
                 if ($rep.ConsecutiveReplicationFailures -gt 0) { $healthStatus = "FAIL" } elseif ($null -eq $latencyMinutes) { $healthStatus = "UNKNOWN" } elseif ($latencyMinutes -le 15) { $healthStatus = "PASS" } elseif ($latencyMinutes -le 60) { $healthStatus = "WARNING" } elseif ($latencyMinutes -le 240) { $healthStatus = "HIGH WARNING" } else { $healthStatus = "CRITICAL" }
-                $sourceDCName = if ($rep.Partner -match "CN=NTDS Settings,CN=([^,]+)") { $Matches[1] } else { $rep.Partner }
+                
+                $sourceDCName = "Unknown"
+                if ($rep.Partner -match "CN=NTDS Settings,CN=([^,]+)") {
+                    $sourceDCName = $Matches[1]
+                } else {
+                    $sourceDCName = $rep.Partner
+                }
                 
                 $replicationReport.Add([pscustomobject]@{
+                    Domain                       = $dc.Domain
+                    SourceDCName                 = $sourceDCName
+                    SourceDCFullDN               = $rep.Partner
+                    DestinationDC                = $dc.HostName
+                    PartnerType                  = $rep.PartnerType
+                    Partition                    = $rep.Partition
+                    LastReplicationSuccess       = $rep.LastReplicationSuccess
+                    LastReplicationAttempt       = $rep.LastReplicationAttempt
+                    LatencyMinutes               = $latencyMinutes
+                    ConsecutiveFailures          = $rep.ConsecutiveReplicationFailures
+                    LastReplicationResult        = $rep.LastReplicationResult
+                    Health                       = $healthStatus
+                    
                     SiteName                     = $dc.Site
                     DomainController             = $dc.HostName
                     DCIPAddress                  = $dc.IPv4Address
-                    SourceDCName                 = $sourceDCName
                     ReplicationPartner           = $rep.Partner
                     NamingContext                = $rep.Partition
-                    LastReplicationAttempt       = $rep.LastReplicationAttempt
-                    LastReplicationSuccess       = $rep.LastReplicationSuccess
                     ReplicationLatencyMinutes    = $latencyMinutes
                     ReplicationLatencyHours      = $latencyHours
                     ReplicationLatencyStatus     = $healthStatus
-                    ConsecutiveFailures          = $rep.ConsecutiveReplicationFailures
-                    LastReplicationResult        = $rep.LastReplicationResult
                     LastReplicationResultMessage = $rep.LastReplicationResultMessage
                     ReplicationStatus            = $healthStatus
                     PartnerStatus                = $healthStatus
@@ -68,7 +83,31 @@ try
         }
         catch
         {
-            $replicationReport.Add([pscustomobject]@{ SiteName = $dc.Site; DomainController = $dc.HostName; DCIPAddress = $dc.IPv4Address; ReplicationPartner = 'Unable to collect replication metadata'; ReplicationLatencyStatus = 'Error'; LastReplicationResultMessage = $_.Exception.Message; ReplicationStatus = 'Error'; PartnerStatus = 'Error' })
+            $replicationReport.Add([pscustomobject]@{ 
+                Domain = $dc.Domain
+                DestinationDC = $dc.HostName
+                SiteName = $dc.Site
+                DomainController = $dc.HostName
+                DCIPAddress = $dc.IPv4Address
+                SourceDCName = 'Unknown'
+                SourceDCFullDN = 'Unable to collect replication metadata'
+                ReplicationPartner = 'Unable to collect replication metadata'
+                PartnerType = $null
+                Partition = $null
+                NamingContext = $null
+                LastReplicationSuccess = $null
+                LastReplicationAttempt = $null
+                LatencyMinutes = $null
+                ReplicationLatencyMinutes = $null
+                ReplicationLatencyHours = $null
+                ConsecutiveFailures = 0
+                LastReplicationResult = -1
+                LastReplicationResultMessage = $_.Exception.Message
+                Health = 'Error'
+                ReplicationLatencyStatus = 'Error'
+                ReplicationStatus = 'Error'
+                PartnerStatus = 'Error'
+            })
         }
 
         try
@@ -95,6 +134,68 @@ try
 }
 catch { $report.Errors += [pscustomobject]@{ Section = 'ReplicationPartners'; Error = $_.Exception.Message } }
 $report.Timings.Add([pscustomobject]@{ Section = 'ReplicationPartners'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
+
+$t0 = Get-Date
+try
+{
+    $replicationConnections = [System.Collections.Generic.List[object]]::new()
+    $connections = @(Get-ADReplicationConnection -Filter * -Properties * -Credential $cred -ErrorAction Stop)
+
+    foreach ($conn in $connections)
+    {
+        $sourceDC = "Unknown"
+        $sourceSite = "Unknown"
+        $targetDC = "Unknown"
+        $targetSite = "Unknown"
+
+        if ($conn.ReplicateFromDirectoryServer -match "CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+            $sourceDC = $Matches[1]
+            $sourceSite = $Matches[2]
+        }
+
+        if ($conn.ReplicateToDirectoryServer -match "CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+            $targetDC = $Matches[1]
+            $targetSite = $Matches[2]
+        } elseif ($conn.DistinguishedName -match "CN=([^,]+),CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+            $targetDC = $Matches[2]
+            $targetSite = $Matches[3]
+        }
+
+        $connectionType = "IntraSite"
+        if ($conn.InterSiteTransportProtocol) {
+            $connectionType = "InterSite"
+        }
+
+        $transportProtocol = "RPC"
+        if ($conn.InterSiteTransportProtocol -match "CN=([^,]+),") {
+            $transportProtocol = $Matches[1]
+        } elseif ($conn.InterSiteTransportProtocol) {
+            $transportProtocol = $conn.InterSiteTransportProtocol
+        }
+
+        $replicationConnections.Add([pscustomobject]@{
+            ConnectionName                    = $conn.Name
+            SourceDC                          = $sourceDC
+            SourceSite                        = $sourceSite
+            TargetDC                          = $targetDC
+            TargetSite                        = $targetSite
+            ConnectionType                    = $connectionType
+            TransportProtocol                 = $transportProtocol
+            EnabledConnection                 = $conn.Enabled
+            Options                           = $conn.Options
+            ReplicatedNamingContexts          = $conn.ReplicatedNamingContexts
+            PartiallyReplicatedNamingContexts = $conn.PartiallyReplicatedNamingContexts
+            ReplicationReasons                = $conn.'mS-DS-ReplicatesNCReason'
+            DistinguishedName                 = $conn.DistinguishedName
+            Created                           = $conn.Created
+            Modified                          = $conn.Modified
+        })
+    }
+
+    $report.ReplicationConnections = $replicationConnections
+}
+catch { $report.Errors += [pscustomobject]@{ Section = 'ReplicationConnections'; Error = $_.Exception.Message } }
+$report.Timings.Add([pscustomobject]@{ Section = 'ReplicationConnections'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
 
 $t0 = Get-Date
 try

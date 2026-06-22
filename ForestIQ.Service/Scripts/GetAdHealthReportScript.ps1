@@ -12,6 +12,7 @@
                     SiteSubnetDCMapping = @()
                     ReplicationPartners = @()
                     ReplicationFailures = @()
+                    ReplicationConnections = @()
                     PortConnectivity    = @()
                     DcLocator           = $null
                     RepadminSummary     = $null
@@ -521,6 +522,71 @@
                     $report.Errors += [pscustomobject]@{ Section = 'ReplicationPartners'; Error = $_.Exception.Message }
                 }
                 $report.Timings.Add([pscustomobject]@{ Section = 'ReplicationPartners'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
+
+                $t0 = Get-Date
+                try
+                {
+                    $replicationConnections = [System.Collections.Generic.List[object]]::new()
+                    $connections = @(Get-ADReplicationConnection -Filter * -Properties * -Credential $cred -ErrorAction Stop)
+
+                    foreach ($conn in $connections)
+                    {
+                        $sourceDC = "Unknown"
+                        $sourceSite = "Unknown"
+                        $targetDC = "Unknown"
+                        $targetSite = "Unknown"
+
+                        if ($conn.ReplicateFromDirectoryServer -match "CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+                            $sourceDC = $Matches[1]
+                            $sourceSite = $Matches[2]
+                        }
+
+                        if ($conn.ReplicateToDirectoryServer -match "CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+                            $targetDC = $Matches[1]
+                            $targetSite = $Matches[2]
+                        } elseif ($conn.DistinguishedName -match "CN=([^,]+),CN=NTDS Settings,CN=([^,]+),CN=Servers,CN=([^,]+)") {
+                            $targetDC = $Matches[2]
+                            $targetSite = $Matches[3]
+                        }
+
+                        $connectionType = "IntraSite"
+                        if ($conn.InterSiteTransportProtocol) {
+                            $connectionType = "InterSite"
+                        }
+
+                        $transportProtocol = "RPC"
+                        if ($conn.InterSiteTransportProtocol -match "CN=([^,]+),") {
+                            $transportProtocol = $Matches[1]
+                        } elseif ($conn.InterSiteTransportProtocol) {
+                            $transportProtocol = $conn.InterSiteTransportProtocol
+                        }
+
+                        $replicationConnections.Add([pscustomobject]@{
+                            ConnectionName                    = $conn.Name
+                            SourceDC                          = $sourceDC
+                            SourceSite                        = $sourceSite
+                            TargetDC                          = $targetDC
+                            TargetSite                        = $targetSite
+                            ConnectionType                    = $connectionType
+                            TransportProtocol                 = $transportProtocol
+                            EnabledConnection                 = $conn.Enabled
+                            Options                           = $conn.Options
+                            ReplicatedNamingContexts          = $conn.ReplicatedNamingContexts
+                            PartiallyReplicatedNamingContexts = $conn.PartiallyReplicatedNamingContexts
+                            ReplicationReasons                = $conn.'mS-DS-ReplicatesNCReason'
+                            DistinguishedName                 = $conn.DistinguishedName
+                            Created                           = $conn.Created
+                            Modified                          = $conn.Modified
+                        })
+                    }
+
+                    $report.ReplicationConnections = $replicationConnections
+                }
+                catch
+                {
+                    $report.Errors += [pscustomobject]@{ Section = 'ReplicationConnections'; Error = $_.Exception.Message }
+                }
+                $report.Timings.Add([pscustomobject]@{ Section = 'ReplicationConnections'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
 
                 $t0 = Get-Date
                 try

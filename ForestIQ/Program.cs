@@ -14,7 +14,7 @@ namespace ForestIQ
 {
     public class Program
     {
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
 
@@ -53,6 +53,8 @@ namespace ForestIQ
             builder.Services.AddScoped<IConfigureService, ConfigureService>();
             builder.Services.AddScoped<IPowerShellService, PowerShellService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
+            builder.Services.AddScoped<IUserRepository, UserRepository>();
+            builder.Services.AddScoped<IUserService, UserService>();
 
             var key = Encoding.UTF8.GetBytes(Runtime.Jwt.Key);
             
@@ -119,6 +121,19 @@ namespace ForestIQ
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ForestIqDbContext>();
                 dbContext.Database.Migrate();
+
+                // Seed Super Admin if no users exist
+                var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+                if (!await userService.HasAnyUsersAsync())
+                {
+                    var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
+                    await userService.AddUserAsync(new Domain.DTO.User
+                    {
+                        Email = "admin@admin.com",
+                        EncryptedPassword = encryptionService.Protect("Admin@123"),
+                        Role = "SuperAdmin"
+                    });
+                }
             }
 
             // Configure the HTTP request pipeline.

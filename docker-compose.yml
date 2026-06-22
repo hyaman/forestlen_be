@@ -4,3 +4,9 @@ services:
     build:
       context: .
       dockerfile: ForestIQ/Dockerfile
+      
+    ports:
+       - "8080:8080"
+       - "8081:8081"
+    volumes: 
+        - "C:\\ForestIQ\\Data:/app/data"
