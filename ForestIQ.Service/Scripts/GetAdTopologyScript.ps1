@@ -200,12 +200,21 @@ $report.Timings.Add([pscustomobject]@{ Section = 'DcLocator'; ElapsedSeconds = [
 $t0 = Get-Date
 try
 {
-    $domainDN = (Get-ADDomain -Credential $cred -ErrorAction Stop).DistinguishedName
-    $topLevelOUs = @(Get-ADOrganizationalUnit -Filter * -SearchBase $domainDN -SearchScope OneLevel -Credential $cred -ErrorAction Stop)
+    $domainInfo = Get-ADDomain -Server $domain.DNSRoot -Credential $cred -ErrorAction Stop
+    $domainDN = $domainInfo.DistinguishedName
+    $topLevelOUs = @(Get-ADOrganizationalUnit -Filter * -SearchBase $domainDN -SearchScope OneLevel -Server $domainInfo.DNSRoot -Credential $cred -ErrorAction Stop)
     $report.TopLevelOUs = foreach ($ou in $topLevelOUs) {
+        $objectCount = 0
+        try {
+            $objectCount = @(Get-ADObject -Filter * -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Server $domainInfo.DNSRoot -Credential $cred).Count
+        } catch {}
+        
         [pscustomobject]@{
             Name              = $ou.Name
+            Type              = "Organizational Unit"
             DistinguishedName = $ou.DistinguishedName
+            Domain            = $domain.DNSRoot
+            ObjectCount       = $objectCount
         }
     }
 }
@@ -215,7 +224,7 @@ $report.Timings.Add([pscustomobject]@{ Section = 'TopLevelOUs'; ElapsedSeconds =
 $t0 = Get-Date
 try
 {
-    $pwdPolicy = Get-ADDefaultDomainPasswordPolicy -Credential $cred -ErrorAction Stop
+    $pwdPolicy = Get-ADDefaultDomainPasswordPolicy -Server $domain.DNSRoot -Credential $cred -ErrorAction Stop
     $recycleBin = Get-ADOptionalFeature -Filter {Name -eq "Recycle Bin Feature"} -Credential $cred -ErrorAction Stop
     
     $report.SecurityPosture = [pscustomobject]@{

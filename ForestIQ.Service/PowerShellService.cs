@@ -193,45 +193,6 @@ namespace ForestIQ.Service
             };
         }
 
-        //public async Task<GraphResponse?> GetAdDiagnosticsAsync(bool refreshView = false)
-        //{
-        //    if (refreshView)
-        //    {
-        //        _logger.LogInformation("Force-refreshing AD diagnostics cache.");
-        //        _memoryCache.Remove(AdDiagnosticsCacheKey);
-        //    }
-        //    else if (_memoryCache.TryGetValue(AdDiagnosticsCacheKey, out GraphResponse? cached) && cached != null)
-        //    {
-        //        _logger.LogInformation("Returning AD diagnostics from in-memory cache.");
-        //        return cached;
-        //    }
-
-        //    return await FetchAndCacheDiagnosticsAsync();
-        //}
-
-        //private async Task<GraphResponse?> FetchAndCacheDiagnosticsAsync()
-        //{
-        //    var powerShellConnectionRequest = CheckAndGetSession();
-
-        //    var result = await ExecutePowerShellAsync(powerShellConnectionRequest, GetExecutionScript(), "get-ad-health-report-script", GetAdHealthReportScript());
-
-        //    if (!result.Success || !result.Data.HasValue)
-        //    {
-        //        return null;
-        //    }
-
-        //    var graphResponse = GraphMapper.MapToGraphResponse(result.Data);
-
-        //    _memoryCache.Set(AdDiagnosticsCacheKey, graphResponse, new MemoryCacheEntryOptions
-        //    {
-        //        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
-        //        SlidingExpiration = TimeSpan.FromHours(2)
-        //    });
-
-        //    _logger.LogInformation("AD diagnostics fetched and stored in in-memory cache.");
-
-        //    return graphResponse;
-        //}
         private string GetCacheKey(string? domain, string? site)
         {
             return $"{AdDiagnosticsCacheKey}_{domain ?? "all"}_{site ?? "all"}";
@@ -728,8 +689,6 @@ namespace ForestIQ.Service
                   (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || 
                    bytes[0] == 192 && bytes[1] == 168;
         }
-
-
 
         private async Task<IPAddress[]?> TryStandardDnsAsync(string domainName)
         {

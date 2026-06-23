@@ -93,6 +93,145 @@ namespace ForestIQ.Service
 
             var replicationHealthSummary = GetObject(root, "ReplicationHealthSummary");
             var (forestHealth, forestReason) = GetForestHealth(repadminSummary, replicationHealthSummary, domainElements);
+            var activeReplicationFailures = replicationFailures.Count(f => GetString(f, "Status").Equals("Failure Found", StringComparison.OrdinalIgnoreCase));
+            var globalCatalogs = GetArray(forestInfo, "GlobalCatalogs")
+                .Select(gc => gc.ValueKind == JsonValueKind.String ? gc.GetString() : GetString(gc, "Name", GetString(gc, "HostName")))
+                .Where(gc => !string.IsNullOrWhiteSpace(gc))
+                .Select(gc => gc!)
+                .ToList();
+            var domainNames = domainElements
+                .Select(domain => GetString(domain, "DomainName"))
+                .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var siteNames = sites
+                .Select(site => GetString(site, "Name"))
+                .Where(site => !string.IsNullOrWhiteSpace(site))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+           // var dcDiagIssueCount = dcDiagSummary.Count(diag => !GetString(diag, "Status", "Healthy").Equals("Healthy", StringComparison.OrdinalIgnoreCase));
+           // var siteLinkWarningCount = siteLinks.Count(link => !GetString(link, "Status", "Healthy").Equals("Healthy", StringComparison.OrdinalIgnoreCase) &&
+           //                                                    !GetString(link, "Status").Equals("Informational", StringComparison.OrdinalIgnoreCase));
+           // var closedPortChecks = portConnectivity.Count(port => !GetBool(port, "Open"));
+           // var slowestTiming = timings
+           //     .OrderByDescending(timing => GetDouble(timing, "ElapsedSeconds"))
+           //     .FirstOrDefault();
+            var forestMeta = new Dictionary<string, object>
+            {
+                { "functionalLevel", GetString(domainForestInfo, "ForestMode") },
+                { "description", $"Active Directory Forest: {forestName}" },
+                { "rootDomain", rootDomain },
+                { "domainCount", forestChildIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() },
+                { "siteCount", sites.Count },
+                { "lastDiscoveredAt", generatedAt },
+                { "attributes", CompactAttributes(new Dictionary<string, object?>
+                    {
+                        { "generatedAt", generatedAt },
+                        { "rootDomain", rootDomain },
+                        { "globalCatalogs", globalCatalogs.Count },
+                        { "statusMessage", forestReason }
+                    }
+                ) },
+                { "statusMessage", forestReason },
+                { "schemaMaster", GetString(domainForestInfo, "SchemaMaster") },
+                { "domainNamingMaster", GetString(domainForestInfo, "DomainNamingMaster") },
+                { "totalDomainControllers", domainControllers.Count },
+                { "totalSubnets", subnets.Count },
+                { "totalUsers", GetInt(domainForestInfo, "UserCount") },
+                { "totalGroups", GetInt(domainForestInfo, "GroupCount") },
+                { "globalCatalogCount", globalCatalogs.Count },
+                { "globalCatalogs", globalCatalogs },
+                { "domainNames", domainNames },
+                { "siteNames", siteNames },
+                { "writableDomainControllers", domainControllers.Count(dc => !GetBool(dc, "IsReadOnly")) },
+                { "readOnlyDomainControllers", domainControllers.Count(dc => GetBool(dc, "IsReadOnly")) },
+                { "configurationServerCount", configurationServers.Count },
+                { "siteLinkCount", siteLinks.Count },
+                //{ "siteLinkWarningCount", siteLinkWarningCount },
+                { "replicationPartnerCount", replicationPartners.Count },
+                { "replicationConnectionCount", replicationConnections.Count },
+                { "activeReplicationFailures", activeReplicationFailures },
+                //{ "replicationHealth", new
+                //    {
+                //        healthy = GetBool(replicationHealthSummary, "Healthy", GetBool(repadminSummary, "Healthy", true)),
+                //        activeFailures = GetInt(replicationHealthSummary, "ActiveFailures", activeReplicationFailures)
+                //    }
+                //},
+                //{ "repadminSummary", new
+                //    {
+                //        healthy = GetBool(repadminSummary, "Healthy", true),
+                //        sourceDsaCount = GetArray(repadminSummary, "SourceDSA").Count,
+                //        destinationDsaCount = GetArray(repadminSummary, "DestinationDSA").Count,
+                //        operationalErrorCount = GetArray(repadminSummary, "OperationalErrors").Count
+                //    }
+                //},
+                //{ "dcDiagSummary", new
+                //    {
+                //        healthyCount = dcDiagSummary.Count(diag => GetString(diag, "Status", "Healthy").Equals("Healthy", StringComparison.OrdinalIgnoreCase)),
+                //        issueCount = dcDiagIssueCount,
+                //        warningCount = dcDiagSummary.Count(diag => GetString(diag, "Status").Equals("Warning", StringComparison.OrdinalIgnoreCase)),
+                //        criticalCount = dcDiagSummary.Count(diag => GetString(diag, "Status").Equals("Critical", StringComparison.OrdinalIgnoreCase) ||
+                //                                                    GetString(diag, "Status").Equals("Error", StringComparison.OrdinalIgnoreCase))
+                //    }
+                //},
+                //{ "portConnectivitySummary", new
+                //    {
+                //        totalChecks = portConnectivity.Count,
+                //        openChecks = portConnectivity.Count(port => GetBool(port, "Open")),
+                //        closedChecks = closedPortChecks,
+                //        affectedDomainControllers = portConnectivity
+                //            .Where(port => !GetBool(port, "Open"))
+                //            .Select(port => GetString(port, "DomainController"))
+                //            .Where(dc => !string.IsNullOrWhiteSpace(dc))
+                //            .Distinct(StringComparer.OrdinalIgnoreCase)
+                //            .Count()
+                //    }
+                //},
+                { "topLevelOuCount", topLevelOUs.Count },
+                { "scriptErrorCount", errors.Count },
+                { "scriptErrors", errors.Select(e => new { Section = GetString(e, "Section"), Error = GetString(e, "Error") }) },
+                { "scriptTimings", timings.Select(t => new { Section = GetString(t, "Section"), ElapsedSeconds = GetDouble(t, "ElapsedSeconds") }) }
+            };
+
+            if (dcLocator.HasValue)
+            {
+                forestMeta["dcLocator"] = new
+                {
+                    domainController = GetString(dcLocator, "DomainController"),
+                    ipAddress = GetString(dcLocator, "Address"),
+                    domainName = GetString(dcLocator, "DomainName"),
+                    forestName = GetString(dcLocator, "ForestName"),
+                    dcSite = GetString(dcLocator, "DcSiteName"),
+                    clientSite = GetString(dcLocator, "OurSiteName"),
+                    flags = GetString(dcLocator, "Flags")
+                };
+            }
+
+            if (securityPosture.HasValue)
+            {
+                forestMeta["securityPosture"] = new
+                {
+                    recycleBinEnabled = GetBool(securityPosture, "RecycleBinEnabled"),
+                    complexityEnabled = GetBool(securityPosture, "ComplexityEnabled"),
+                    minPasswordLength = GetInt(securityPosture, "MinPasswordLength"),
+                    maxPasswordAgeDays = GetInt(securityPosture, "MaxPasswordAgeDays"),
+                    minPasswordAgeDays = GetInt(securityPosture, "MinPasswordAgeDays"),
+                    passwordHistoryCount = GetInt(securityPosture, "PasswordHistoryCount"),
+                    lockoutThreshold = GetInt(securityPosture, "LockoutThreshold"),
+                    lockoutDurationMins = GetInt(securityPosture, "LockoutDurationMins"),
+                    lockoutObservationMins = GetInt(securityPosture, "LockoutObservationMins")
+                };
+            }
+
+            //if (slowestTiming.ValueKind != JsonValueKind.Undefined)
+            //{
+            //    forestMeta["slowestScriptTiming"] = new
+            //    {
+            //        section = GetString(slowestTiming, "Section"),
+            //        elapsedSeconds = GetDouble(slowestTiming, "ElapsedSeconds")
+            //    };
+            //}
+
             var forestNode = new GraphNode
             {
                 Id = forestId,
@@ -102,32 +241,7 @@ namespace ForestIQ.Service
                 ParentId = null,
                 Depth = 0,
                 ChildIds = forestChildIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                Meta = new Dictionary<string, object>
-                {
-                    { "functionalLevel", GetString(domainForestInfo, "ForestMode") },
-                    { "description", $"Active Directory Forest: {forestName}" },
-                    { "domainCount", forestChildIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() },
-                    { "siteCount", sites.Count },
-                    { "lastDiscoveredAt", generatedAt },
-                        { "attributes", CompactAttributes(new Dictionary<string, object?>
-                            {
-                                { "generatedAt", generatedAt },
-                                { "rootDomain", rootDomain },
-                                { "globalCatalogs", GetArrayLength(forestInfo, "GlobalCatalogs") },
-                                { "statusMessage", forestReason }
-                            }
-                        ) },
-                    { "statusMessage", forestReason },
-                    { "schemaMaster", GetString(domainForestInfo, "SchemaMaster") },
-                    { "domainNamingMaster", GetString(domainForestInfo, "DomainNamingMaster") },
-                    { "totalDomainControllers", domainControllers.Count },
-                    { "totalSubnets", subnets.Count },
-                    { "totalUsers", GetInt(domainForestInfo, "UserCount") },
-                    { "totalGroups", GetInt(domainForestInfo, "GroupCount") },
-                    { "activeReplicationFailures", replicationFailures.Count(f => GetString(f, "Status").Equals("Failure Found", StringComparison.OrdinalIgnoreCase)) },
-                    { "scriptErrors", errors.Select(e => new { Section = GetString(e, "Section"), Error = GetString(e, "Error") }) },
-                    { "scriptTimings", timings.Select(t => new { Section = GetString(t, "Section"), ElapsedSeconds = GetDouble(t, "ElapsedSeconds") }) }
-                }
+                Meta = forestMeta
             };
             response.Nodes.Add(forestNode);
 
@@ -214,10 +328,20 @@ namespace ForestIQ.Service
                         };
                     }
                     
-                    domainNode.Meta["topLevelOUs"] = topLevelOUs.Select(ou => new
+                    domainNode.Meta["topLevelOUs"] = topLevelOUs.Select(ou => 
                     {
-                        name = GetString(ou, "Name"),
-                        distinguishedName = GetString(ou, "DistinguishedName")
+                        var name = GetString(ou, "Name");
+                        var count = GetInt(ou, "ObjectCount");
+                        return new
+                        {
+                            name = name,
+                            type = GetString(ou, "Type", "Organizational Unit"),
+                            domain = GetString(ou, "Domain", domainName),
+                            description = GetFriendlyOuDescription(name),
+                            distinguishedName = GetString(ou, "DistinguishedName"),
+                            objectCount = count,
+                            objectCountLabel = count > 0 ? $"Contains {count} Object{(count == 1 ? "" : "s")}" : "Empty"
+                        };
                     }).Where(ou => !string.IsNullOrWhiteSpace(ou.name)).ToList();
                 }
 
@@ -254,6 +378,42 @@ namespace ForestIQ.Service
                     .Select(subnet => GetString(subnet, "Name"))
                     .Where(name => !string.IsNullOrWhiteSpace(name))
                     .ToList();
+                var subnetDetails = subnets
+                    .Where(subnet => NormalizeSiteName(GetString(subnet, "Site")).Equals(siteName, StringComparison.OrdinalIgnoreCase))
+                    .Select(subnet => new
+                    {
+                        cidr = GetString(subnet, "Name"),
+                        location = GetString(subnet, "Location"),
+                        description = GetString(subnet, "Description"),
+                        site = siteName
+                    })
+                    .Where(subnet => !string.IsNullOrWhiteSpace(subnet.cidr))
+                    .ToList();
+                var siteLinkDetails = BuildSiteLinks(siteName, siteLinks);
+                var siteLinkSummary = BuildSiteLinkSummary(siteName, siteLinks);
+                var siteDomainControllers = domainControllers
+                    .Where(dc => GetString(dc, "Site").Equals(siteName, StringComparison.OrdinalIgnoreCase))
+                    .Select(dc =>
+                    {
+                        var fqdn = GetString(dc, "HostName");
+                        var (health, statusMessage) = GetDcHealth(fqdn, replicationFailures, repadminSummary, dcDiagSummary);
+                        return new
+                        {
+                            name = GetString(dc, "Name", fqdn),
+                            fqdn,
+                            ipAddress = GetString(dc, "IPv4Address"),
+                            domain = GetDomainFromFqdn(fqdn),
+                            isGlobalCatalog = GetBool(dc, "IsGlobalCatalog"),
+                            isReadOnly = GetBool(dc, "IsReadOnly"),
+                            operatingSystem = GetString(dc, "OperatingSystem"),
+                            operatingSystemVersion = GetString(dc, "OperatingSystemVersion"),
+                            uptimeHours = GetDouble(dc, "UptimeHours"),
+                            fsmoRoles = GetFsmoRoles(dc),
+                            health,
+                            statusMessage
+                        };
+                    })
+                    .ToList();
 
                 siteIdsByName[siteName] = siteId;
                 siteDcIds[siteId] = [];
@@ -272,8 +432,15 @@ namespace ForestIQ.Service
                     Meta = new Dictionary<string, object>
                     {
                         { "dcCount", totalSiteDcCount },
+                        { "subnetCount", subnetCidrs.Count },
+                        { "siteLinkCount", siteLinkSummary.Total },
+                        { "siteLinkWarningCount", siteLinkSummary.Warning },
+                        { "description", GetString(site, "Description") },
                         { "subnetCidrs", subnetCidrs },
-                        { "siteLinkCost", BuildSiteLinks(siteName, siteLinks) },
+                        { "subnetDetails", subnetDetails },
+                        { "domainControllers", siteDomainControllers },
+                        { "siteLinkSummary", siteLinkSummary },
+                        { "siteLinkCost", siteLinkDetails },
                         { "statusMessage", siteReason }
                     }
                 });
@@ -323,10 +490,39 @@ namespace ForestIQ.Service
 
                 var (health, dcStatusMessage) = GetDcHealth(fqdn, replicationFailures, repadminSummary, dcDiagSummary);
                 var attrs = BuildDcAttributes(fqdn, health, dcStatusMessage, replicationFailures, repadminSummary);
+                var dcDomain = GetDomainFromFqdn(fqdn);
+                var dcInboundPartners = replicationPartners
+                    .Where(partner => GetString(partner, "DomainController").Equals(fqdn, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var dcOutboundPartners = replicationPartners
+                    .Where(partner => GetString(partner, "SourceDCName").Equals(dcName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var dcActiveFailures = replicationFailures
+                    .Where(failure => GetString(failure, "DomainController").Equals(fqdn, StringComparison.OrdinalIgnoreCase) &&
+                                      GetString(failure, "Status").Equals("Failure Found", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var dcNamingContexts = dcInboundPartners
+                    .Select(partner => GetString(partner, "NamingContext", GetString(partner, "Partition")))
+                    .Where(context => !string.IsNullOrWhiteSpace(context))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var dcDiag = dcDiagSummary.FirstOrDefault(diag => GetString(diag, "DomainController").Equals(fqdn, StringComparison.OrdinalIgnoreCase));
+                var portSummary = BuildPortSummary(fqdn, portConnectivity);
+                var worstLatencyMinutes = dcInboundPartners
+                    .Select(partner => GetDouble(partner, "LatencyMinutes", GetDouble(partner, "ReplicationLatencyMinutes")))
+                    .DefaultIfEmpty(0)
+                    .Max();
+                var lastSuccessfulReplication = dcInboundPartners
+                    .Select(partner => GetNullableString(partner, "LastReplicationSuccess"))
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .OrderByDescending(value => value, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
                 var meta = new Dictionary<string, object>
                 {
                     { "fqdn", fqdn },
                     { "ipAddress", GetString(dc, "IPv4Address") },
+                    { "domain", dcDomain },
+                    { "siteName", siteName },
                     { "parentDomainId", domainId },
                     { "fsmoRoles", GetFsmoRoles(dc) },
                     { "isGlobalCatalog", GetBool(dc, "IsGlobalCatalog") },
@@ -334,6 +530,36 @@ namespace ForestIQ.Service
                     { "operatingSystem", GetString(dc, "OperatingSystem") },
                     { "operatingSystemVersion", GetString(dc, "OperatingSystemVersion") },
                     { "uptimeHours", GetDouble(dc, "UptimeHours") },
+                    { "replicationSummary", new
+                        {
+                            inboundPartnerCount = dcInboundPartners
+                                .Select(partner => GetString(partner, "SourceDCName"))
+                                .Where(partner => !string.IsNullOrWhiteSpace(partner))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .Count(),
+                            outboundPartnerCount = dcOutboundPartners
+                                .Select(partner => GetString(partner, "DomainController"))
+                                .Where(partner => !string.IsNullOrWhiteSpace(partner))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .Count(),
+                            activeFailureCount = dcActiveFailures.Count,
+                            historicalFailureCount = replicationFailures.Count(failure =>
+                                GetString(failure, "DomainController").Equals(fqdn, StringComparison.OrdinalIgnoreCase) &&
+                                GetString(failure, "Status").Equals("Historical Failure", StringComparison.OrdinalIgnoreCase)),
+                            worstLatencyMinutes,
+                            lastSuccessAt = lastSuccessfulReplication,
+                            namingContextCount = dcNamingContexts.Count,
+                            namingContexts = dcNamingContexts.Select(BuildNamingContextInfo).ToList()
+                        }
+                    },
+                    { "diagnosticsSummary", new
+                        {
+                            status = dcDiag.ValueKind == JsonValueKind.Undefined ? "Unknown" : GetString(dcDiag, "Status", "Unknown"),
+                            category = dcDiag.ValueKind == JsonValueKind.Undefined ? "Unknown" : GetString(dcDiag, "Category", "Unknown"),
+                            details = dcDiag.ValueKind == JsonValueKind.Undefined ? "No DCDiag result was collected for this domain controller." : GetString(dcDiag, "Details")
+                        }
+                    },
+                    { "portSummary", portSummary },
                     { "attributes", attrs },
                     { "statusMessage", dcStatusMessage },
                 };
@@ -536,9 +762,6 @@ namespace ForestIQ.Service
 
                 if (dcIdsByName.TryGetValue(sourceDC, out var sourceId) && dcIdsByName.TryGetValue(targetDC, out var targetId))
                 {
-                    // If an active replication partner edge already exists between these DCs, don't create a duplicate.
-                    // Note: ReplicationPartner edges are stored as SourceId=DestinationDC, TargetId=SourceDC (PULL direction).
-                    // We align the KCC connections to this same direction to easily deduplicate.
                     if (response.Edges.Any(e => e.SourceId == targetId && e.TargetId == sourceId && e.RelationshipType == "REPLICATION_LINK"))
                     {
                         continue;
@@ -584,10 +807,7 @@ namespace ForestIQ.Service
             }
         }
 
-        private static void AddSubnetNodesAndEdges(
-            GraphResponse response,
-            List<JsonElement> subnets,
-            Dictionary<string, string> siteIdsByName)
+        private static void AddSubnetNodesAndEdges(GraphResponse response,List<JsonElement> subnets,Dictionary<string, string> siteIdsByName)
         {
             foreach (var subnet in subnets)
             {
@@ -632,13 +852,7 @@ namespace ForestIQ.Service
             }
         }
 
-        private static void AddReplicationPartnerEdges(
-            GraphResponse response,
-            List<JsonElement> replicationPartners,
-            List<JsonElement> replicationConnections,
-            Dictionary<string, string> dcIdsByFqdn,
-            Dictionary<string, string> dcIdsByName,
-            Dictionary<string, string> dcFqdnsById)
+        private static void AddReplicationPartnerEdges(GraphResponse response,List<JsonElement> replicationPartners,List<JsonElement> replicationConnections,Dictionary<string, string> dcIdsByFqdn,Dictionary<string, string> dcIdsByName,Dictionary<string, string> dcFqdnsById)
         {
             foreach (var partner in replicationPartners)
             {
@@ -690,14 +904,23 @@ namespace ForestIQ.Service
                            (dcIdsByName.TryGetValue(kccTargetDC, out var kTargetId) && kTargetId == sourceId);
                 });
 
-                var connectionType = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "ConnectionType") : "Unknown";
-                var transportProtocol = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "TransportProtocol") : "Unknown";
-                var connName = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "ConnectionName") : "Unknown";
+                var connectionMatched = matchingConnection.ValueKind != JsonValueKind.Undefined;
+                var connectionType = connectionMatched ? GetString(matchingConnection, "ConnectionType") : GetBool(partner, "IsIntersite") ? "InterSite" : "IntraSite";
+                var transportProtocol = connectionMatched ? GetString(matchingConnection, "TransportProtocol") : "RPC";
+                var connName = connectionMatched ? GetString(matchingConnection, "ConnectionName") : null;
                 var connCreated = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "Created") : null;
                 var connModified = matchingConnection.ValueKind != JsonValueKind.Undefined ? GetString(matchingConnection, "Modified") : null;
-                var contexts = matchingConnection.ValueKind != JsonValueKind.Undefined 
-                    ? GetArray(matchingConnection, "ReplicatedNamingContexts").Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : "")).Where(s => !string.IsNullOrEmpty(s)).ToList()
-                    : new List<string>();
+                var contexts = connectionMatched
+                    ? GetArray(matchingConnection, "ReplicatedNamingContexts")
+                        .Select(s => s.ValueKind == JsonValueKind.String ? s.GetString() : (s.ValueKind == JsonValueKind.Object ? GetString(s, "Value") : ""))
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .Select(s => s!)
+                        .ToList()
+                    : new[] { GetString(partner, "NamingContext", GetString(partner, "Partition")) }
+                        .Where(context => !string.IsNullOrWhiteSpace(context))
+                        .ToList();
+                var namingContext = GetString(partner, "NamingContext", GetString(partner, "Partition"));
+                var contextDetails = contexts.Select(BuildNamingContextInfo).ToList();
 
                 response.Edges.Add(new GraphEdge
                 {
@@ -708,12 +931,30 @@ namespace ForestIQ.Service
                     Style = GetReplicationStyle(status),
                     ReplicationData = new
                     {
+                        connectionMatched,
                         connectionType = connectionType,
                         transportProtocol = transportProtocol,
                         name = connName,
                         replicatedNamingContexts = contexts,
+                        replicatedNamingContextDetails = contextDetails,
                         created = connCreated,
                         modified = connModified,
+                        sourceSite = GetString(partner, "SourceSite"),
+                        destinationSite = GetString(partner, "DestinationSite", GetString(partner, "SiteName")),
+                        partnerType = GetString(partner, "PartnerType"),
+                        namingContext,
+                        namingContextDetails = BuildNamingContextInfo(namingContext),
+                        replicationScope = new
+                        {
+                            configuredPartitionCount = contexts.Count,
+                            configuredPartitions = contextDetails,
+                            metricPartition = BuildNamingContextInfo(namingContext),
+                            connectionObjectMatched = connectionMatched,
+                            connectionObjectStatus = connectionMatched ? "Matched" : "Not matched",
+                            displaySummary = contexts.Count == 1
+                                ? $"Replicating {BuildNamingContextLabel(contexts[0])}"
+                                : $"Replicating {contexts.Count} directory partitions"
+                        },
 
                         latencySeconds = (int)(latencyMinutes * 60),
                         latencyMinutes = latencyMinutes,
@@ -730,11 +971,7 @@ namespace ForestIQ.Service
             }
         }
 
-        private static void AddReplicationFailureEdges(
-            GraphResponse response,
-            List<JsonElement> replicationFailures,
-            Dictionary<string, string> dcIdsByFqdn,
-            Dictionary<string, string> dcFqdnsById)
+        private static void AddReplicationFailureEdges(GraphResponse response,List<JsonElement> replicationFailures,Dictionary<string, string> dcIdsByFqdn,Dictionary<string, string> dcFqdnsById)
         {
             var fallbackTargetId = response.Nodes.FirstOrDefault(node => node.Type == "DOMAIN_CONTROLLER" && node.Label.StartsWith("HQ", StringComparison.OrdinalIgnoreCase))?.Id
                 ?? response.Nodes.FirstOrDefault(node => node.Type == "DOMAIN_CONTROLLER")?.Id;
@@ -809,6 +1046,92 @@ namespace ForestIQ.Service
             return links;
         }
 
+        private static SiteLinkSummary BuildSiteLinkSummary(string siteName, List<JsonElement> siteLinks)
+        {
+            var links = siteLinks
+                .Where(link => GetSiteNamesFromSiteLink(link).Contains(siteName, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            var intervals = links
+                .Select(link => GetInt(link, "ReplicationIntervalMinutes"))
+                .Where(interval => interval > 0)
+                .ToList();
+            var costs = links
+                .Select(link => GetInt(link, "Cost"))
+                .Where(cost => cost > 0)
+                .ToList();
+
+            return new SiteLinkSummary
+            {
+                Total = links.Count,
+                Healthy = links.Count(link => GetString(link, "Status").Equals("Healthy", StringComparison.OrdinalIgnoreCase)),
+                Warning = links.Count(link => GetString(link, "Status").Equals("Warning", StringComparison.OrdinalIgnoreCase)),
+                Informational = links.Count(link => GetString(link, "Status").Equals("Informational", StringComparison.OrdinalIgnoreCase)),
+                CustomSchedule = links.Count(link => GetBool(link, "ScheduleExistsBool") || GetString(link, "ScheduleExists").Equals("Yes", StringComparison.OrdinalIgnoreCase)),
+                LowestCost = costs.Count > 0 ? costs.Min() : null,
+                FastestIntervalMinutes = intervals.Count > 0 ? intervals.Min() : null,
+                SlowestIntervalMinutes = intervals.Count > 0 ? intervals.Max() : null
+            };
+        }
+
+        private static object BuildNamingContextInfo(string distinguishedName)
+        {
+            var type = GetNamingContextType(distinguishedName);
+
+            return new
+            {
+                distinguishedName,
+                type,
+                label = BuildNamingContextLabel(distinguishedName),
+                description = type switch
+                {
+                    "Domain" => "Domain partition containing domain objects such as users, groups, computers, OUs, and GPO links.",
+                    "Configuration" => "Forest-wide configuration partition containing sites, services, and replication topology.",
+                    "Schema" => "Forest schema partition defining AD object classes and attributes.",
+                    "ForestDnsZones" => "Forest-wide DNS application partition.",
+                    "DomainDnsZones" => "Domain DNS application partition.",
+                    _ => "Active Directory naming context."
+                }
+            };
+        }
+
+        private static string BuildNamingContextLabel(string distinguishedName)
+        {
+            var type = GetNamingContextType(distinguishedName);
+            var dnsName = DnToDnsName(distinguishedName);
+
+            return type switch
+            {
+                "Domain" when !string.IsNullOrWhiteSpace(dnsName) => $"Domain: {dnsName}",
+                "Configuration" when !string.IsNullOrWhiteSpace(dnsName) => $"Configuration: {dnsName}",
+                "Schema" when !string.IsNullOrWhiteSpace(dnsName) => $"Schema: {dnsName}",
+                "ForestDnsZones" when !string.IsNullOrWhiteSpace(dnsName) => $"Forest DNS Zones: {dnsName}",
+                "DomainDnsZones" when !string.IsNullOrWhiteSpace(dnsName) => $"Domain DNS Zones: {dnsName}",
+                _ => string.IsNullOrWhiteSpace(distinguishedName) ? "Unknown partition" : distinguishedName
+            };
+        }
+
+        private static string GetNamingContextType(string distinguishedName)
+        {
+            if (string.IsNullOrWhiteSpace(distinguishedName)) return "Unknown";
+            if (distinguishedName.StartsWith("CN=Schema,CN=Configuration,", StringComparison.OrdinalIgnoreCase)) return "Schema";
+            if (distinguishedName.StartsWith("CN=Configuration,", StringComparison.OrdinalIgnoreCase)) return "Configuration";
+            if (distinguishedName.StartsWith("DC=ForestDnsZones,", StringComparison.OrdinalIgnoreCase)) return "ForestDnsZones";
+            if (distinguishedName.StartsWith("DC=DomainDnsZones,", StringComparison.OrdinalIgnoreCase)) return "DomainDnsZones";
+            if (Regex.IsMatch(distinguishedName, @"^(DC=[^,]+,?)+$", RegexOptions.IgnoreCase)) return "Domain";
+            return "Other";
+        }
+
+        private static string DnToDnsName(string distinguishedName)
+        {
+            if (string.IsNullOrWhiteSpace(distinguishedName)) return string.Empty;
+
+            return string.Join(".",
+                Regex.Matches(distinguishedName, @"(?:^|,)DC=([^,]+)", RegexOptions.IgnoreCase)
+                    .Select(match => match.Groups[1].Value)
+                    .Where(part => !part.Equals("DomainDnsZones", StringComparison.OrdinalIgnoreCase) &&
+                                   !part.Equals("ForestDnsZones", StringComparison.OrdinalIgnoreCase)));
+        }
+
         private static List<object> BuildPortStatus(string fqdn, List<JsonElement> ports)
         {
             return ports
@@ -821,6 +1144,27 @@ namespace ForestIQ.Service
                 })
                 .Cast<object>()
                 .ToList();
+        }
+
+        private static PortSummary BuildPortSummary(string fqdn, List<JsonElement> ports)
+        {
+            var dcPorts = ports
+                .Where(port => GetString(port, "DomainController").Equals(fqdn, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var closedServices = dcPorts
+                .Where(port => !GetBool(port, "Open"))
+                .Select(port => GetString(port, "Service"))
+                .Where(service => !string.IsNullOrWhiteSpace(service))
+                .ToList();
+
+            return new PortSummary
+            {
+                Total = dcPorts.Count,
+                Open = dcPorts.Count(port => GetBool(port, "Open")),
+                Closed = closedServices.Count,
+                AllOpen = dcPorts.Count > 0 && closedServices.Count == 0,
+                ClosedServices = closedServices
+            };
         }
 
         private static List<object> BuildDiagTests(string fqdn, List<JsonElement> dcDiagSummary)
@@ -1304,6 +1648,22 @@ namespace ForestIQ.Service
                 JsonValueKind.False => false,
                 JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) ? parsed : fallback,
                 _ => fallback
+            };
+        }
+        private static string GetFriendlyOuDescription(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Organizational Unit.";
+            return name.Trim().ToLowerInvariant() switch
+            {
+                "domain controllers" => "Contains all Domain Controllers in the domain.",
+                "users" => "Contains user accounts and groups.",
+                "computers" => "Contains computer objects.",
+                "builtin" => "Built-in system groups and accounts.",
+                "managed service accounts" => "Managed Service Accounts for automated tasks.",
+                "system" => "Built-in system objects.",
+                "program data" => "Data for domain applications.",
+                "microsoft exchange security groups" => "Security groups used by Microsoft Exchange.",
+                _ => "Organizational Unit."
             };
         }
     }

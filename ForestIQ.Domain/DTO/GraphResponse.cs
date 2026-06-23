@@ -50,4 +50,23 @@ namespace ForestIQ.Domain.DTO
         public string SiteName { get; set; } = string.Empty;
         public string Source { get; set; } = string.Empty;
     }
+    public class SiteLinkSummary
+    {
+        public int Total { get; set; }
+        public int Healthy { get; set; }
+        public int Warning { get; set; }
+        public int Informational { get; set; }
+        public int CustomSchedule { get; set; }
+        public int? LowestCost { get; set; }
+        public int? FastestIntervalMinutes { get; set; }
+        public int? SlowestIntervalMinutes { get; set; }
+    }
+    public class PortSummary
+    {
+        public int Total { get; set; }
+        public int Open { get; set; }
+        public int Closed { get; set; }
+        public bool AllOpen { get; set; }
+        public List<string> ClosedServices { get; set; } = [];
+    }
 }

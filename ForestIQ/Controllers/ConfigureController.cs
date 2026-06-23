@@ -45,11 +45,6 @@ namespace ForestIQ.Controllers
                 return BadRequest(response);
             }
 
-            //if (response.AdConfiguration != null)
-            //{
-            //    response.AdConfiguration.EncryptedPassword = "";
-            //}
-
             return Ok(response);
         }
 

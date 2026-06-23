@@ -57,8 +57,7 @@ namespace ForestIQ
             builder.Services.AddScoped<IUserService, UserService>();
 
             var key = Encoding.UTF8.GetBytes(Runtime.Jwt.Key);
-            
-            
+
             builder.Services
                 .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
@@ -129,20 +128,16 @@ namespace ForestIQ
                     var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
                     await userService.AddUserAsync(new Domain.DTO.User
                     {
-                        Email = "admin@admin.com",
-                        EncryptedPassword = encryptionService.Protect("Admin@123"),
+                        Email = "admin@aislytics.com",
+                        EncryptedPassword = encryptionService.Protect("@dminP@ssw0rd!"),
                         Role = "SuperAdmin"
                     });
                 }
             }
 
-            // Configure the HTTP request pipeline.
-            //if (app.Environment.IsDevelopment())
-            //{
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            //}
-            
+            app.UseSwagger();
+            app.UseSwaggerUI();
+
             app.UseCors("AllowPolicy");
 
             app.UseHttpsRedirection();
@@ -150,7 +145,6 @@ namespace ForestIQ
             app.UseMiddleware<ExceptionMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();
-
 
             app.MapControllers();
 
