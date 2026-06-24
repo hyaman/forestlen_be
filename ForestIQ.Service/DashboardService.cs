@@ -1,10 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using System.Threading.Tasks;
+using System.Linq;
+using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using ForestIQ.Domain;
 using ForestIQ.Domain.DTO;
 using ForestIQ.Domain.Interface;
+using ForestIQ.Domain.Models.Dashboard;
 
 namespace ForestIQ.Service
 {
@@ -12,11 +17,13 @@ namespace ForestIQ.Service
     {
         private readonly IPowerShellService _powerShellService;
         private readonly ILogger<DashboardService> _logger;
+        private readonly IMemoryCache _cache;
 
-        public DashboardService(IPowerShellService powerShellService, ILogger<DashboardService> logger)
+        public DashboardService(IPowerShellService powerShellService, ILogger<DashboardService> logger, IMemoryCache cache)
         {
             _powerShellService = powerShellService;
             _logger = logger;
+            _cache = cache;
         }
 
         private async Task<JsonElement?> ExecuteDashboardScriptAsync(string scriptName, string variablesPrepended)
@@ -24,6 +31,7 @@ namespace ForestIQ.Service
             try
             {
                 var scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "Dashboard", scriptName);
+                
                 if (!File.Exists(scriptPath))
                 {
                     _logger.LogError($"Dashboard script not found at path: {scriptPath}");
@@ -51,28 +59,231 @@ namespace ForestIQ.Service
             }
         }
 
-        public async Task<JsonElement?> GetDcInventoryAsync(string targetDc)
+        public async Task<List<DcInventoryModel>?> GetDcInventoryAsync(DashboardFilterRequest filter)
         {
-            var vars = $"$TargetDC = '{targetDc}'";
-            return await ExecuteDashboardScriptAsync("Get-DcInventory.ps1", vars);
+            string cacheKey = $"Dashboard_Inventory_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
+            if (!filter.RefreshView && _cache.TryGetValue(cacheKey, out List<DcInventoryModel>? cachedResult))
+            {
+                return cachedResult;
+            }
+
+            string allCacheKey = "Dashboard_Inventory_All_All_All_All_All";
+
+            if (!filter.RefreshView && _cache.TryGetValue(allCacheKey, out List<DcInventoryModel>? allCachedResult))
+            {
+                var filtered = allCachedResult.AsEnumerable();
+                
+                if (filter.TargetDc != "All" && !string.IsNullOrEmpty(filter.TargetDc))
+                    filtered = filtered.Where(x => x.Inventory?.ServerName?.Equals(filter.TargetDc, StringComparison.OrdinalIgnoreCase) == true || x.Inventory?.FQDN?.Equals(filter.TargetDc, StringComparison.OrdinalIgnoreCase) == true);
+                
+                if (filter.Domain != "All" && !string.IsNullOrEmpty(filter.Domain))
+                    filtered = filtered.Where(x => x.Inventory?.FQDN?.EndsWith(filter.Domain, StringComparison.OrdinalIgnoreCase) == true);
+                    
+                if (filter.Site != "All" && !string.IsNullOrEmpty(filter.Site))
+                    filtered = filtered.Where(x => x.Inventory?.Site?.Equals(filter.Site, StringComparison.OrdinalIgnoreCase) == true);
+                    
+                if (filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
+                    filtered = filtered.Where(x => (x.Inventory?.OverallStatus ?? "Unknown").Equals(filter.Health, StringComparison.OrdinalIgnoreCase));
+
+                var finalResult = filtered.ToList();
+                _cache.Set(cacheKey, finalResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                return finalResult;
+            }
+
+            var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
+            var result = await ExecuteDashboardScriptAsync("Get-DcInventory.ps1", vars);
+            if (!result.HasValue) return null;
+            
+            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcInventoryModel>>(result.Value.GetRawText())
+                : new List<DcInventoryModel> { JsonSerializer.Deserialize<DcInventoryModel>(result.Value.GetRawText())! };
+
+            if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
+            {
+                mappedResult = mappedResult.Where(x => (x.Inventory?.OverallStatus ?? "Unknown").Equals(filter.Health, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+            return mappedResult;
         }
 
-        public async Task<JsonElement?> GetDcLogonSessionsAsync(string targetDc)
+        public async Task<List<DcLogonSessionModel>?> GetDcLogonSessionsAsync(DashboardFilterRequest filter)
         {
-            var vars = $"$TargetDC = '{targetDc}'";
-            return await ExecuteDashboardScriptAsync("Get-DcLogonSessions.ps1", vars);
+            string cacheKey = $"Dashboard_LogonSessions_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
+            if (!filter.RefreshView && _cache.TryGetValue(cacheKey, out List<DcLogonSessionModel>? cachedResult))
+            {
+                return cachedResult;
+            }
+
+            string allCacheKey = "Dashboard_LogonSessions_All_All_All_All_All";
+            if (!filter.RefreshView && _cache.TryGetValue(allCacheKey, out List<DcLogonSessionModel>? allCachedResult))
+            {
+                var filtered = allCachedResult.AsEnumerable();
+                
+                var inventory = await GetDcInventoryAsync(new DashboardFilterRequest 
+                { 
+                    TargetDc = filter.TargetDc, Forest = filter.Forest, Domain = filter.Domain, Site = filter.Site, Health = filter.Health 
+                });
+                
+                if (inventory != null)
+                {
+                    var validHosts = inventory.Select(i => i.Inventory?.ServerName)
+                                              .Where(s => !string.IsNullOrEmpty(s))
+                                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    filtered = filtered.Where(x => x.ServerName != null && validHosts.Contains(x.ServerName));
+                }
+
+                var finalResult = filtered.ToList();
+                _cache.Set(cacheKey, finalResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                return finalResult;
+            }
+
+            var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
+            var result = await ExecuteDashboardScriptAsync("Get-DcLogonSessions.ps1", vars);
+            
+            if (!result.HasValue) return null;
+
+            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcLogonSessionModel>>(result.Value.GetRawText()) 
+                : new List<DcLogonSessionModel> { JsonSerializer.Deserialize<DcLogonSessionModel>(result.Value.GetRawText())! };
+
+            if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
+            {
+                var inventory = await GetDcInventoryAsync(new DashboardFilterRequest { TargetDc = filter.TargetDc, Forest = filter.Forest, Domain = filter.Domain, Site = filter.Site });
+                if (inventory != null)
+                {
+                    var validHosts = inventory.Where(i => (i.Inventory?.OverallStatus ?? "Unknown").Equals(filter.Health, StringComparison.OrdinalIgnoreCase))
+                                              .Select(i => i.Inventory?.ServerName)
+                                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    mappedResult = mappedResult.Where(x => validHosts.Contains(x.ServerName)).ToList();
+                }
+            }
+
+            _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+            return mappedResult;
         }
 
-        public async Task<JsonElement?> GetDcAuthSummaryAsync(string targetDc, int lookBackHours = 24)
+        public async Task<List<DcAuthSummaryModel>?> GetDcAuthSummaryAsync(DashboardFilterRequest filter)
         {
-            var vars = $"$TargetDC = '{targetDc}'\n$AuthLookBackHours = {lookBackHours}";
-            return await ExecuteDashboardScriptAsync("Get-DcAuthSummary.ps1", vars);
+            string cacheKey = $"Dashboard_AuthSummary_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}_{filter.LookBackHours}";
+            if (!filter.RefreshView && _cache.TryGetValue(cacheKey, out List<DcAuthSummaryModel>? cachedResult))
+            {
+                return cachedResult;
+            }
+
+            string allCacheKey = $"Dashboard_AuthSummary_All_All_All_All_All_{filter.LookBackHours}";
+            if (!filter.RefreshView && _cache.TryGetValue(allCacheKey, out List<DcAuthSummaryModel>? allCachedResult))
+            {
+                var filtered = allCachedResult.AsEnumerable();
+                
+                var inventory = await GetDcInventoryAsync(new DashboardFilterRequest 
+                { 
+                    TargetDc = filter.TargetDc, Forest = filter.Forest, Domain = filter.Domain, Site = filter.Site, Health = filter.Health 
+                });
+                
+                if (inventory != null)
+                {
+                    var validHosts = inventory.Select(i => i.Inventory?.ServerName)
+                                              .Where(s => !string.IsNullOrEmpty(s))
+                                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    filtered = filtered.Where(x => x.ServerName != null && validHosts.Contains(x.ServerName));
+                }
+
+                var finalResult = filtered.ToList();
+                _cache.Set(cacheKey, finalResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                return finalResult;
+            }
+
+            var vars = $"$TargetDC = '{filter.TargetDc}'\n$AuthLookBackHours = {filter.LookBackHours}\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
+            var result = await ExecuteDashboardScriptAsync("Get-DcAuthSummary.ps1", vars);
+            if (!result.HasValue) return null;
+
+            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcAuthSummaryModel>>(result.Value.GetRawText())
+                : new List<DcAuthSummaryModel> { JsonSerializer.Deserialize<DcAuthSummaryModel>(result.Value.GetRawText())! };
+
+            if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
+            {
+                var inventory = await GetDcInventoryAsync(new DashboardFilterRequest { TargetDc = filter.TargetDc, Forest = filter.Forest, Domain = filter.Domain, Site = filter.Site });
+                if (inventory != null)
+                {
+                    var validHosts = inventory.Where(i => (i.Inventory?.OverallStatus ?? "Unknown").Equals(filter.Health, StringComparison.OrdinalIgnoreCase))
+                                              .Select(i => i.Inventory?.ServerName)
+                                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    mappedResult = mappedResult.Where(x => validHosts.Contains(x.ServerName)).ToList();
+                }
+            }
+
+            _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+            return mappedResult;
         }
 
-        public async Task<JsonElement?> GetDcNtdsHealthAsync(string targetDc)
+        public async Task<List<DcNtdsHealthModel>?> GetDcNtdsHealthAsync(DashboardFilterRequest filter)
         {
-            var vars = $"$TargetDC = '{targetDc}'";
-            return await ExecuteDashboardScriptAsync("Get-DcNtdsHealth.ps1", vars);
+            string cacheKey = $"Dashboard_NtdsHealth_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
+            if (!filter.RefreshView && _cache.TryGetValue(cacheKey, out List<DcNtdsHealthModel>? cachedResult))
+            {
+                return cachedResult;
+            }
+
+            string allCacheKey = "Dashboard_NtdsHealth_All_All_All_All_All";
+            if (!filter.RefreshView && _cache.TryGetValue(allCacheKey, out List<DcNtdsHealthModel>? allCachedResult))
+            {
+                var filtered = allCachedResult.AsEnumerable();
+                
+                var inventory = await GetDcInventoryAsync(new DashboardFilterRequest 
+                { 
+                    TargetDc = filter.TargetDc, Forest = filter.Forest, Domain = filter.Domain, Site = filter.Site, Health = filter.Health 
+                });
+                
+                if (inventory != null)
+                {
+                    var validHosts = inventory.Select(i => i.Inventory?.ServerName)
+                                              .Where(s => !string.IsNullOrEmpty(s))
+                                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    filtered = filtered.Where(x => x.ServerName != null && validHosts.Contains(x.ServerName));
+                }
+
+                var finalResult = filtered.ToList();
+                _cache.Set(cacheKey, finalResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                return finalResult;
+            }
+
+            var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
+            var result = await ExecuteDashboardScriptAsync("Get-DcNtdsHealth.ps1", vars);
+            if (!result.HasValue) return null;
+
+            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcNtdsHealthModel>>(result.Value.GetRawText())
+                : new List<DcNtdsHealthModel> { JsonSerializer.Deserialize<DcNtdsHealthModel>(result.Value.GetRawText())! };
+
+            if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
+            {
+                mappedResult = mappedResult.Where(x => (x.Health ?? "Unknown").Equals(filter.Health, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+            return mappedResult;
+        }
+
+        public async Task<List<DcHierarchyRawModel>?> GetDcHierarchyAsync(string domainFilter = "All", string siteFilter = "All", bool refreshView = false)
+        {
+            string cacheKey = $"Dashboard_Hierarchy_{domainFilter}_{siteFilter}";
+            if (!refreshView && _cache.TryGetValue(cacheKey, out List<DcHierarchyRawModel>? cachedResult))
+            {
+                return cachedResult;
+            }
+
+            var vars = $"$DomainFilter = '{domainFilter}'\n$SiteFilter = '{siteFilter}'";
+            var result = await ExecuteDashboardScriptAsync("Get-DcHierarchy.ps1", vars);
+            if (!result.HasValue) return null;
+
+            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcHierarchyRawModel>>(result.Value.GetRawText())
+                : new List<DcHierarchyRawModel> { JsonSerializer.Deserialize<DcHierarchyRawModel>(result.Value.GetRawText())! };
+
+            _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+            return mappedResult;
         }
     }
 }

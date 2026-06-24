@@ -54,11 +54,12 @@ namespace ForestIQ.Middleware
                 await WriteResponseAsync(
                     context,
                     HttpStatusCode.InternalServerError,
-                    "An unexpected error occurred.");
+                    "An unexpected error occurred.",
+                    ex.Message);
             }
         }
 
-        private static async Task WriteResponseAsync(HttpContext context,HttpStatusCode statusCode,string message)
+        private static async Task WriteResponseAsync(HttpContext context,HttpStatusCode statusCode,string message,string ErrorMessage = "")
         {
             context.Response.ContentType =
                 "application/json";
@@ -70,7 +71,8 @@ namespace ForestIQ.Middleware
             {
                 Data = "",
                 Success = false,
-                Message = message
+                Message = message,
+                ErrorMesasge = ErrorMessage
             };
 
             await context.Response.WriteAsync(JsonSerializer.Serialize(response));

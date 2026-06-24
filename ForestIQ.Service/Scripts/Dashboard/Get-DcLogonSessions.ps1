@@ -3,7 +3,34 @@ $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Fo
 $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
 
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
-    $DCs = Get-ADDomainController -Credential $cred -Filter * | Select-Object -ExpandProperty HostName
+    $DCs = @()
+    try {
+        $Forest = Get-ADForest
+        if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
+            $Domains = @()
+        } else {
+            $Domains = if ($DomainFilter -ne 'All' -and -not [string]::IsNullOrEmpty($DomainFilter)) {
+                @($DomainFilter)
+            } else {
+                $Forest.Domains
+            }
+        }
+        foreach ($DomainName in $Domains) {
+            $DomainDCs = Get-ADDomainController -Server $DomainName -Credential $cred -Filter *
+            if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
+                $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
+            }
+            if ($DomainDCs) {
+                $DCs += $DomainDCs | Select-Object -ExpandProperty HostName
+            }
+        }
+    } catch {
+        $DomainDCs = Get-ADDomainController -Credential $cred -Filter *
+        if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
+            $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
+        }
+        $DCs = $DomainDCs | Select-Object -ExpandProperty HostName
+    }
 } else {
     $DCs = @($TargetDC)
 }
