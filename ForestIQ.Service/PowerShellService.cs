@@ -33,6 +33,7 @@ namespace ForestIQ.Service
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IKerberosService _kerberosService;
         private readonly IConfigureService _configureService;
+        private readonly IConfiguration _configuration;
 
         public PowerShellService(
             ILogger<PowerShellService> logger,
@@ -41,7 +42,8 @@ namespace ForestIQ.Service
             IEncryptionService encryptionService,
             IHttpContextAccessor httpContextAccessor,
             IKerberosService kerberosService,
-            IConfigureService configureService)
+            IConfigureService configureService,
+            IConfiguration configuration)
         {
             _logger = logger;
             _cache = cache;
@@ -50,6 +52,7 @@ namespace ForestIQ.Service
             _httpContextAccessor = httpContextAccessor;
             _kerberosService = kerberosService;
             _configureService = configureService;
+            _configuration = configuration;
         }
 
         public async Task<PowerShellExecutionResult> ConnectAsync(PowerShellRequest request)
@@ -135,7 +138,7 @@ namespace ForestIQ.Service
             }
 
             var connectionErrors = new List<string>();
-            var isDebug = Runtime.Debug.Enabled;
+            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
             foreach (var host in hostsToTry)
             {
                 _logger.LogInformation(
@@ -189,7 +192,73 @@ namespace ForestIQ.Service
                 Error = string.Join(" | ", connectionErrors)
             };
         }
-        
+
+        private string GetCacheKey(string? domain, string? site)
+        {
+            return $"{AdDiagnosticsCacheKey}_{domain ?? "all"}_{site ?? "all"}";
+        }
+
+        public async Task<GraphResponse?> GetAdDiagnosticsAsync(bool refreshView = false, string? domain = null, string? site = null)
+        {
+            var cacheKey = GetCacheKey(domain, site);
+
+            if (refreshView)
+            {
+                _logger.LogInformation("Force-refreshing AD diagnostics cache.");
+                _memoryCache.Remove(cacheKey);
+            }
+            else if (_memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
+            {
+                _logger.LogInformation("Returning AD diagnostics from in-memory cache.");
+
+                return GraphMapper.MapToGraphResponse(cachedResult.Data);
+            }
+
+            return await FetchAndCacheDiagnosticsAsync(domain, site);
+        }
+
+        private async Task<GraphResponse?> FetchAndCacheDiagnosticsAsync(string? domain, string? site)
+        {
+            var powerShellConnectionRequest = CheckAndGetSession("", domain, site);
+
+            var result = await ExecutePowerShellAsync(
+                powerShellConnectionRequest,
+                GetExecutionScript(),
+                "get-ad-health-report-script",
+                GetAdHealthReportScript());
+
+            if (!result.Success || !result.Data.HasValue)
+            {
+                return null;
+            }
+
+            var cacheKey = GetCacheKey(domain, site);
+            _memoryCache.Set(cacheKey, result, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
+                SlidingExpiration = TimeSpan.FromHours(2)
+            });
+
+            _logger.LogInformation("AD diagnostics fetched and stored in cache.");
+
+            return GraphMapper.MapToGraphResponse(result.Data);
+        }
+
+        private JsonElement MergeJsonElements(JsonElement? baseElement, JsonElement newElement)
+        {
+            if (!baseElement.HasValue) return newElement;
+
+            var baseNode = System.Text.Json.Nodes.JsonObject.Create(baseElement.Value) ?? new System.Text.Json.Nodes.JsonObject();
+            var newNode = System.Text.Json.Nodes.JsonObject.Create(newElement) ?? new System.Text.Json.Nodes.JsonObject();
+
+            foreach (var kvp in newNode)
+            {
+                baseNode[kvp.Key] = kvp.Value?.DeepClone();
+            }
+
+            return System.Text.Json.JsonSerializer.Deserialize<JsonElement>(baseNode.ToJsonString());
+        }
+
         public async Task<GraphResponse?> GetAdTopologyAsync(bool refreshView = false, string? domain = null, string? site = null)
         {
             var cacheKey = GetCacheKey(domain, site);
@@ -199,24 +268,10 @@ namespace ForestIQ.Service
                 _logger.LogInformation("Force-refreshing AD diagnostics cache.");
                 _memoryCache.Remove(cacheKey);
             }
-            else
+            else if (_memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
             {
-                if (_memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
-                {
-                    _logger.LogInformation("Returning AD topology from in-memory cache.");
-                    if (cachedResult.Data.HasValue)
-                    {
-                        return FilterAndMapGraphResponse(cachedResult.Data.Value, null, null);
-                    }
-                    return GraphMapper.MapToGraphResponse(cachedResult.Data);
-                }
-
-                var globalCacheKey = GetCacheKey(null, null);
-                if (cacheKey != globalCacheKey && _memoryCache.TryGetValue(globalCacheKey, out PowerShellExecutionResult? globalCachedResult) && globalCachedResult != null && globalCachedResult.Data.HasValue)
-                {
-                    _logger.LogInformation("Returning filtered AD topology from GLOBAL in-memory cache.");
-                    return FilterAndMapGraphResponse(globalCachedResult.Data.Value, domain, site);
-                }
+                _logger.LogInformation("Returning AD topology from in-memory cache.");
+                return GraphMapper.MapToGraphResponse(cachedResult.Data);
             }
 
             var powerShellConnectionRequest = CheckAndGetSession("", domain, site);
@@ -231,50 +286,27 @@ namespace ForestIQ.Service
                 return null;
             }
 
-            _memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? existingCache);
-            var mergedData = MergeJsonElements(existingCache?.Data, result.Data.Value);
-
-            var mergedResult = new PowerShellExecutionResult
-            {
-                Success = true,
-                StatusCode = result.StatusCode,
-                Data = mergedData
-            };
-
-            _memoryCache.Set(cacheKey, mergedResult, new MemoryCacheEntryOptions
+            _memoryCache.Set(cacheKey, result, new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
                 SlidingExpiration = TimeSpan.FromHours(2)
             });
 
-            _logger.LogInformation("AD topology fetched and merged in cache.");
+            _logger.LogInformation("AD topology fetched and stored in cache.");
 
-            return FilterAndMapGraphResponse(mergedData, null, null);
+            return GraphMapper.MapToGraphResponse(result.Data);
         }
 
         public async Task<GraphResponse?> GetAdReplicationAsync(bool refreshView = false, string? domain = null, string? site = null)
         {
             var cacheKey = GetCacheKey(domain, site);
 
-            if (!refreshView)
+            if (!refreshView && _memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
             {
-                if (_memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
+                if (cachedResult.Data.HasValue && cachedResult.Data.Value.TryGetProperty("ReplicationPartners", out var repProp) && repProp.ValueKind == JsonValueKind.Array)
                 {
-                    if (cachedResult.Data.HasValue && cachedResult.Data.Value.TryGetProperty("ReplicationPartners", out var repProp) && repProp.ValueKind == JsonValueKind.Array)
-                    {
-                        _logger.LogInformation("Returning AD replication from in-memory cache.");
-                        return FilterAndMapGraphResponse(cachedResult.Data.Value, null, null);
-                    }
-                }
-
-                var globalCacheKey = GetCacheKey(null, null);
-                if (cacheKey != globalCacheKey && _memoryCache.TryGetValue(globalCacheKey, out PowerShellExecutionResult? globalCachedResult) && globalCachedResult != null && globalCachedResult.Data.HasValue)
-                {
-                    if (globalCachedResult.Data.Value.TryGetProperty("ReplicationPartners", out var globalRepProp) && globalRepProp.ValueKind == JsonValueKind.Array)
-                    {
-                        _logger.LogInformation("Returning filtered AD replication from GLOBAL in-memory cache.");
-                        return FilterAndMapGraphResponse(globalCachedResult.Data.Value, domain, site);
-                    }
+                    _logger.LogInformation("Returning AD replication from in-memory cache.");
+                    return GraphMapper.MapToGraphResponse(cachedResult.Data);
                 }
             }
 
@@ -309,32 +341,19 @@ namespace ForestIQ.Service
 
             _logger.LogInformation("AD replication fetched and merged in cache.");
 
-            return FilterAndMapGraphResponse(mergedData, null, null);
+            return GraphMapper.MapToGraphResponse(mergedData);
         }
 
         public async Task<GraphResponse?> GetAdDiagnosticsProgressiveAsync(bool refreshView = false, string? domain = null, string? site = null)
         {
             var cacheKey = GetCacheKey(domain, site);
 
-            if (!refreshView)
+            if (!refreshView && _memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
             {
-                if (_memoryCache.TryGetValue(cacheKey, out PowerShellExecutionResult? cachedResult) && cachedResult != null)
+                if (cachedResult.Data.HasValue && cachedResult.Data.Value.TryGetProperty("DcDiagSummary", out var diagProp) && diagProp.ValueKind == JsonValueKind.Array)
                 {
-                    if (cachedResult.Data.HasValue && cachedResult.Data.Value.TryGetProperty("DcDiagSummary", out var diagProp) && diagProp.ValueKind == JsonValueKind.Array)
-                    {
-                        _logger.LogInformation("Returning AD progressive diagnostics from in-memory cache.");
-                        return FilterAndMapGraphResponse(cachedResult.Data.Value, null, null);
-                    }
-                }
-
-                var globalCacheKey = GetCacheKey(null, null);
-                if (cacheKey != globalCacheKey && _memoryCache.TryGetValue(globalCacheKey, out PowerShellExecutionResult? globalCachedResult) && globalCachedResult != null && globalCachedResult.Data.HasValue)
-                {
-                    if (globalCachedResult.Data.Value.TryGetProperty("DcDiagSummary", out var globalDiagProp) && globalDiagProp.ValueKind == JsonValueKind.Array)
-                    {
-                        _logger.LogInformation("Returning filtered AD progressive diagnostics from GLOBAL in-memory cache.");
-                        return FilterAndMapGraphResponse(globalCachedResult.Data.Value, domain, site);
-                    }
+                    _logger.LogInformation("Returning AD progressive diagnostics from in-memory cache.");
+                    return GraphMapper.MapToGraphResponse(cachedResult.Data);
                 }
             }
 
@@ -369,7 +388,7 @@ namespace ForestIQ.Service
 
             _logger.LogInformation("AD diagnostics fetched and merged in cache.");
 
-            return FilterAndMapGraphResponse(mergedData, null, null);
+            return GraphMapper.MapToGraphResponse(mergedData);
         }
 
         public async Task<PowerShellExecutionResult> ExecuteCommandAsync(PowerShellExecuteRequest request)
@@ -587,111 +606,6 @@ namespace ForestIQ.Service
             response.DomainControllers.AddRange(domainControllersResult.DomainControllers);
             return response;
         }
-
-        #region Private Methods 
-       
-        private string GetCacheKey(string? domain, string? site)
-        {
-            return $"{AdDiagnosticsCacheKey}_{domain ?? "all"}_{site ?? "all"}";
-        }
-
-        private async Task<GraphResponse?> FetchAndCacheDiagnosticsAsync(string? domain, string? site)
-        {
-            var powerShellConnectionRequest = CheckAndGetSession("", domain, site);
-
-            var result = await ExecutePowerShellAsync(
-                powerShellConnectionRequest,
-                GetExecutionScript(),
-                "get-ad-health-report-script",
-                GetAdHealthReportScript());
-
-            if (!result.Success || !result.Data.HasValue)
-            {
-                return null;
-            }
-
-            var cacheKey = GetCacheKey(domain, site);
-            _memoryCache.Set(cacheKey, result, new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
-                SlidingExpiration = TimeSpan.FromHours(2)
-            });
-
-            _logger.LogInformation("AD diagnostics fetched and stored in cache.");
-
-            return GraphMapper.MapToGraphResponse(result.Data);
-        }
-
-        private JsonElement MergeJsonElements(JsonElement? baseElement, JsonElement newElement)
-        {
-            if (!baseElement.HasValue) return newElement;
-
-            var baseNode = System.Text.Json.Nodes.JsonObject.Create(baseElement.Value) ?? new System.Text.Json.Nodes.JsonObject();
-            var newNode = System.Text.Json.Nodes.JsonObject.Create(newElement) ?? new System.Text.Json.Nodes.JsonObject();
-
-            foreach (var kvp in newNode)
-            {
-                baseNode[kvp.Key] = kvp.Value?.DeepClone();
-            }
-
-            return System.Text.Json.JsonSerializer.Deserialize<JsonElement>(baseNode.ToJsonString());
-        }
-
-        private GraphResponse? FilterAndMapGraphResponse(JsonElement jsonElement, string? domain = null, string? site = null)
-        {
-            var rawText = jsonElement.GetRawText();
-            var topologyModel = JsonSerializer.Deserialize<ForestIQ.Domain.Models.PowerShell.AdTopologyModel>(rawText);
-            var replicationModel = JsonSerializer.Deserialize<ForestIQ.Domain.Models.PowerShell.AdReplicationModel>(rawText);
-            var diagModel = JsonSerializer.Deserialize<ForestIQ.Domain.Models.PowerShell.AdDiagnosticsModel>(rawText);
-
-            if (!string.IsNullOrEmpty(domain))
-            {
-                if (topologyModel != null)
-                {
-                    topologyModel.Domains = topologyModel.Domains?.Where(d => string.Equals(d.DomainName, domain, StringComparison.OrdinalIgnoreCase)).ToList();
-                    topologyModel.DomainControllers = topologyModel.DomainControllers?.Where(dc => dc.HostName?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
-                    topologyModel.TopLevelOUs = topologyModel.TopLevelOUs?.Where(ou => string.Equals(ou.Domain, domain, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
-
-                if (replicationModel != null)
-                {
-                    replicationModel.ReplicationPartners = replicationModel.ReplicationPartners?.Where(rp => string.Equals(rp.Domain, domain, StringComparison.OrdinalIgnoreCase)).ToList();
-                    replicationModel.ReplicationFailures = replicationModel.ReplicationFailures?.Where(rf => rf.Server?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
-                }
-
-                if (diagModel != null)
-                {
-                    diagModel.PortConnectivity = diagModel.PortConnectivity?.Where(p => p.DomainController?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
-                    diagModel.DcDiagSummary = diagModel.DcDiagSummary?.Where(d => d.DomainController?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
-                }
-            }
-
-            if (!string.IsNullOrEmpty(site))
-            {
-                if (topologyModel != null)
-                {
-                    topologyModel.Sites = topologyModel.Sites?.Where(s => string.Equals(s.Name, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                    topologyModel.DomainControllers = topologyModel.DomainControllers?.Where(dc => string.Equals(dc.Site, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                    topologyModel.Subnets = topologyModel.Subnets?.Where(s => string.Equals(s.Site, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
-
-                if (replicationModel != null)
-                {
-                    replicationModel.ReplicationPartners = replicationModel.ReplicationPartners?.Where(rp => string.Equals(rp.SiteName, site, StringComparison.OrdinalIgnoreCase) || string.Equals(rp.DestinationSite, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                    replicationModel.ReplicationFailures = replicationModel.ReplicationFailures?.Where(rf => string.Equals(rf.SiteName, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
-
-                if (diagModel != null)
-                {
-                    diagModel.PortConnectivity = diagModel.PortConnectivity?.Where(p => string.Equals(p.SiteName, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                    diagModel.DcDiagSummary = diagModel.DcDiagSummary?.Where(d => string.Equals(d.SiteName, site, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
-            }
-
-            return GraphMapper.MapToGraphResponse(topologyModel, replicationModel, diagModel);
-        }
-        
-        #endregion
 
         #region Discover Domain Controllers Helpers
 
@@ -1061,8 +975,8 @@ namespace ForestIQ.Service
 
         private async Task<PowerShellExecutionResult> ExecutePowerShellAsync(PowerShellRequest request, string scriptContent, string scriptPrefix, string? command = null)
         {
-            var isDebug = Runtime.Debug.Enabled;
-            var saveResponse = Runtime.Debug.SaveScriptResponse;
+            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
+            var saveResponse = _configuration.GetValue<bool>("Debug:SaveScriptResponse", true);
 
             var dataPath = "/app/data";
             // For local Windows development without Docker:

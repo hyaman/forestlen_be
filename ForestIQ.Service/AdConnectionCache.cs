@@ -1,7 +1,6 @@
 using ForestIQ.Domain.DTO;
 using ForestIQ.Domain.Interface;
 using Microsoft.Extensions.Caching.Memory;
-using ForestIQ.Domain;
 
 namespace ForestIQ.Service
 {
@@ -11,7 +10,7 @@ namespace ForestIQ.Service
         private readonly IEncryptionService _encryptionService;
         private readonly IKerberosService _kerberosService;
 
-        public AdConnectionCache(IMemoryCache cache, IEncryptionService encryptionService, IKerberosService kerberosService)
+        public AdConnectionCache(IMemoryCache cache,IEncryptionService encryptionService,IKerberosService kerberosService)
         {
             _cache = cache;
             _encryptionService = encryptionService;
@@ -31,10 +30,10 @@ namespace ForestIQ.Service
                 EncryptedPassword = _encryptionService.Protect(request.Password),
                 KerberosCachePath = kerberosCachePath,
                 CreatedAt = DateTime.Now,
-                ExpiresAt = DateTime.Now.AddMinutes(Runtime.Cache.AdConnectionCacheMinutes)
+                ExpiresAt = DateTime.Now.AddMinutes(1440)
             };
 
-            _cache.Set(connectionId,connection,TimeSpan.FromMinutes(Runtime.Cache.AdConnectionCacheMinutes));
+            _cache.Set(connectionId,connection,TimeSpan.FromMinutes(1440));
 
             return connectionId;
         }

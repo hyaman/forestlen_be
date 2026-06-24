@@ -1,73 +1,11 @@
 using ForestIQ.Domain.DTO;
-using ForestIQ.Domain.Models.PowerShell;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Collections.Generic;
 
 namespace ForestIQ.Service
 {
     public static class GraphMapper
     {
-        public static GraphResponse MapToGraphResponse(AdTopologyModel? topology, AdReplicationModel? replication, AdDiagnosticsModel? diagnostics)
-        {
-            var merged = new Dictionary<string, object?>();
-
-            if (topology != null)
-            {
-                merged["GeneratedAt"] = topology.GeneratedAt;
-                merged["DomainForestInfo"] = topology.DomainForestInfo;
-                merged["ForestInfo"] = topology.ForestInfo;
-                merged["Domains"] = topology.Domains;
-                merged["Sites"] = topology.Sites;
-                merged["SiteLinkReport"] = topology.SiteLinkReport;
-                merged["Subnets"] = topology.Subnets;
-                merged["DomainControllers"] = topology.DomainControllers;
-                merged["SiteSubnetDCMapping"] = topology.SiteSubnetDCMapping;
-                merged["DcLocator"] = topology.DcLocator;
-                merged["TopLevelOUs"] = topology.TopLevelOUs;
-                merged["SecurityPosture"] = topology.SecurityPosture;
-                merged["Errors"] = topology.Errors;
-                merged["Timings"] = topology.Timings;
-            }
-
-            if (replication != null)
-            {
-                merged["GeneratedAt"] = replication.GeneratedAt;
-                merged["ReplicationPartners"] = replication.ReplicationPartners;
-                merged["ReplicationFailures"] = replication.ReplicationFailures;
-                merged["ReplicationConnections"] = replication.ReplicationConnections;
-                merged["RepadminSummary"] = replication.RepadminSummary;
-                merged["ReplicationHealthSummary"] = replication.ReplicationHealthSummary;
-                
-                var errors = topology?.Errors ?? new List<ScriptErrorData>();
-                if (replication.Errors != null) errors.AddRange(replication.Errors);
-                merged["Errors"] = errors;
-
-                var timings = topology?.Timings ?? new List<ScriptTimingData>();
-                if (replication.Timings != null) timings.AddRange(replication.Timings);
-                merged["Timings"] = timings;
-            }
-
-            if (diagnostics != null)
-            {
-                merged["GeneratedAt"] = diagnostics.GeneratedAt;
-                merged["PortConnectivity"] = diagnostics.PortConnectivity;
-                merged["DcDiagSummary"] = diagnostics.DcDiagSummary;
-                
-                var errors = merged.TryGetValue("Errors", out var errObj) && errObj is List<ScriptErrorData> errList ? errList : new List<ScriptErrorData>();
-                if (diagnostics.Errors != null) errors.AddRange(diagnostics.Errors);
-                merged["Errors"] = errors;
-
-                var timings = merged.TryGetValue("Timings", out var timeObj) && timeObj is List<ScriptTimingData> timeList ? timeList : new List<ScriptTimingData>();
-                if (diagnostics.Timings != null) timings.AddRange(diagnostics.Timings);
-                merged["Timings"] = timings;
-            }
-
-            var jsonStr = JsonSerializer.Serialize(merged);
-            using var doc = JsonDocument.Parse(jsonStr);
-            return MapToGraphResponse(doc.RootElement);
-        }
-
         public static GraphResponse MapToGraphResponse(JsonElement? data)   
         {
             var response = new GraphResponse();
@@ -251,8 +189,8 @@ namespace ForestIQ.Service
                 //},
                 { "topLevelOuCount", topLevelOUs.Count },
                 { "scriptErrorCount", errors.Count },
-                { "scriptErrors", errors.Select(e => new { Section = GetString(e, "Section"), Error = GetString(e, "Error") }).ToList() },
-                { "scriptTimings", timings.Select(t => new { Section = GetString(t, "Section"), ElapsedSeconds = GetDouble(t, "ElapsedSeconds") }).ToList() }
+                { "scriptErrors", errors.Select(e => new { Section = GetString(e, "Section"), Error = GetString(e, "Error") }) },
+                { "scriptTimings", timings.Select(t => new { Section = GetString(t, "Section"), ElapsedSeconds = GetDouble(t, "ElapsedSeconds") }) }
             };
 
             if (dcLocator.HasValue)
@@ -354,7 +292,7 @@ namespace ForestIQ.Service
                             }
                         ) },
                         { "parentDomain", GetString(domain, "ParentDomain") },
-                        { "childDomains", GetArray(domain, "ChildDomains").Select(s => s.GetString()).Where(s => !string.IsNullOrEmpty(s)).ToList() }
+                        { "childDomains", GetArray(domain, "ChildDomains").Select(s => s.GetString()).Where(s => !string.IsNullOrEmpty(s)) }
                     }
                 };
 
@@ -811,10 +749,7 @@ namespace ForestIQ.Service
             AddReplicationConnectionEdges(response, replicationConnections, dcIdsByName, dcFqdnsById);
 
 
-            if (DateTimeOffset.TryParse(generatedAt, out var parsedDate))
-            {
-                response.GeneratedAt = parsedDate;
-            }
+            response.GeneratedAt = DateTime.Now;
             return response;
         }
 
@@ -1715,7 +1650,6 @@ namespace ForestIQ.Service
                 _ => fallback
             };
         }
-        
         private static string GetFriendlyOuDescription(string? name)
         {
             if (string.IsNullOrWhiteSpace(name)) return "Organizational Unit.";

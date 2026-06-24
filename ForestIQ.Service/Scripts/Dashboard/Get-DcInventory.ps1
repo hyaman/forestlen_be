@@ -3,34 +3,7 @@ $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Fo
 $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
 
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
-    $DCs = @()
-    try {
-        $Forest = Get-ADForest
-        if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
-            $Domains = @()
-        } else {
-            $Domains = if ($DomainFilter -ne 'All' -and -not [string]::IsNullOrEmpty($DomainFilter)) {
-                @($DomainFilter)
-            } else {
-                $Forest.Domains
-            }
-        }
-        foreach ($DomainName in $Domains) {
-            $DomainDCs = Get-ADDomainController -Server $DomainName -Credential $cred -Filter *
-            if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
-                $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
-            }
-            if ($DomainDCs) {
-                $DCs += $DomainDCs | Select-Object -ExpandProperty HostName
-            }
-        }
-    } catch {
-        $DomainDCs = Get-ADDomainController -Credential $cred -Filter *
-        if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
-            $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
-        }
-        $DCs = $DomainDCs | Select-Object -ExpandProperty HostName
-    }
+    $DCs = Get-ADDomainController -Credential $cred -Filter * | Select-Object -ExpandProperty HostName
 } else {
     $DCs = @($TargetDC)
 }
@@ -42,30 +15,6 @@ foreach ($DCName in $DCs) {
         param($TargetDomain, $TargetDC)
         Import-Module ActiveDirectory -ErrorAction SilentlyContinue
         $Computer = $env:COMPUTERNAME
-
-        $CriticalPorts = [ordered]@{
-            DNS      = 53
-            Kerberos = 88
-            RPC      = 135
-            LDAP     = 389
-            SMB      = 445
-            LDAPS    = 636
-            GC       = 3268
-            GCSSL    = 3269
-            ADWS     = 9389
-            WinRM    = 5985
-        }
-
-        function Test-ForestIQPort {
-            param([string]$ComputerName, [int]$Port, [int]$TimeoutMilliseconds = 1000)
-            $TcpClient = New-Object System.Net.Sockets.TcpClient
-            try {
-                $Async = $TcpClient.BeginConnect($ComputerName, $Port, $null, $null)
-                $Open = $Async.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false) -and $TcpClient.Connected
-                if ($Open) { $TcpClient.EndConnect($Async) }
-                return $Open
-            } catch { return $false } finally { $TcpClient.Close() }
-        }
 
         # OS / Hardware
         $OS = Get-CimInstance Win32_OperatingSystem
@@ -188,14 +137,6 @@ foreach ($DCName in $DCs) {
         
         $PendingReboot = ((Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") -or (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired") -or (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations"))
 
-        $PendingUpdateCount = "Unable to check"
-        try {
-            $UpdateSession = New-Object -ComObject Microsoft.Update.Session
-            $Searcher = $UpdateSession.CreateUpdateSearcher()
-            $PendingUpdates = $Searcher.Search("IsInstalled=0 and Type='Software'").Updates
-            $PendingUpdateCount = $PendingUpdates.Count
-        } catch { }
-
 
         # Defender
         $DefenderEnabled = "Unable to check"
@@ -290,23 +231,6 @@ foreach ($DCName in $DCs) {
                 })
         }
         catch { }
-
-        $NTDSEvents = @()
-        try {
-            $NTDSEvents = @(Get-WinEvent -FilterHashtable @{ LogName="Directory Service"; Level=2; StartTime=(Get-Date).AddDays(-7) } -ErrorAction SilentlyContinue)
-        } catch { }
-
-        $OverallStatus = if (
-            $CpuLoad -gt 85 -or
-            $MemoryUsedPercent -gt 90 -or
-            $NTDSEvents.Count -gt 0 -or
-            $PendingReboot -eq $true -or
-            ($DaysSincePatch -ne $null -and $DaysSincePatch -gt 45) -or
-            (($Disks | Where-Object Status -eq "WARNING").Count -gt 0) -or
-            (($Services | Where-Object Health -eq "WARNING").Count -gt 0)
-        ) {
-            "WARNING"
-        } else { "OK" }
         
         $Inventory = [PSCustomObject]@{
             ServerName              = $Computer
@@ -347,29 +271,15 @@ foreach ($DCName in $DCs) {
             RecentHotfixes          = $RecentHotfixes
             FSMORoles               = $OwnedFSMORoles
             Platform                = $Platform
-            OverallStatus           = $OverallStatus
-            PendingUpdates          = $PendingUpdateCount
         }
-
-        $PortConnectivity = @(foreach ($Port in $CriticalPorts.GetEnumerator()) {
-            $Open = Test-ForestIQPort -ComputerName $TargetDC -Port $Port.Value
-            [PSCustomObject]@{
-                ServerName = $Computer
-                Service    = $Port.Key
-                Port       = $Port.Value
-                Open       = $Open
-                Status     = if ($Open) { "OK" } else { "WARNING - Closed / Blocked" }
-            }
-        })
 
         [PSCustomObject]@{
             Inventory = $Inventory
-            Disks            = $Disks
-            Services         = $Services
-            Roles            = $Roles
-            Apps             = $Apps
-            Firewall         = $Firewall
-            PortConnectivity = $PortConnectivity
+            Disks     = $Disks
+            Services  = $Services
+            Roles     = $Roles
+            Apps      = $Apps
+            Firewall  = $Firewall
         }
     } -ErrorAction SilentlyContinue
 

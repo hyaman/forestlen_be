@@ -3,34 +3,7 @@ $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Fo
 $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
 
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
-    $DCs = @()
-    try {
-        $Forest = Get-ADForest
-        if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
-            $Domains = @()
-        } else {
-            $Domains = if ($DomainFilter -ne 'All' -and -not [string]::IsNullOrEmpty($DomainFilter)) {
-                @($DomainFilter)
-            } else {
-                $Forest.Domains
-            }
-        }
-        foreach ($DomainName in $Domains) {
-            $DomainDCs = Get-ADDomainController -Server $DomainName -Credential $cred -Filter *
-            if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
-                $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
-            }
-            if ($DomainDCs) {
-                $DCs += $DomainDCs | Select-Object -ExpandProperty HostName
-            }
-        }
-    } catch {
-        $DomainDCs = Get-ADDomainController -Credential $cred -Filter *
-        if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
-            $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
-        }
-        $DCs = $DomainDCs | Select-Object -ExpandProperty HostName
-    }
+    $DCs = Get-ADDomainController -Credential $cred -Filter * | Select-Object -ExpandProperty HostName
 } else {
     $DCs = @($TargetDC)
 }
@@ -82,32 +55,8 @@ foreach ($DCName in $DCs) {
                     UserName      = Get-EventDataValue -Event $_ -Name "TargetUserName"
                     SourceIP      = Get-EventDataValue -Event $_ -Name "IpAddress"
                     Status        = Get-EventDataValue -Event $_ -Name "Status"
-                    TicketOptions = Get-EventDataValue -Event $_ -Name "TicketOptions"
-                    AuthProtocol  = "Kerberos"
-                    EventID       = 4768
-                    EventType     = "Kerberos TGT Request"
                 }
             })
-        } catch { }
-
-        $KerberosServiceTickets = @()
-        try {
-            $KerbServiceEvents = Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=4769; StartTime=$AuthStartTime } -ErrorAction Stop
-            $KerberosServiceTickets = @(
-                $KerbServiceEvents | ForEach-Object {
-                    [PSCustomObject]@{
-                        TimeCreated   = $_.TimeCreated
-                        UserName      = Get-EventDataValue -Event $_ -Name "TargetUserName"
-                        ServiceName   = Get-EventDataValue -Event $_ -Name "ServiceName"
-                        SourceIP      = Get-EventDataValue -Event $_ -Name "IpAddress"
-                        Status        = Get-EventDataValue -Event $_ -Name "Status"
-                        TicketOptions = Get-EventDataValue -Event $_ -Name "TicketOptions"
-                        AuthProtocol  = "Kerberos"
-                        EventID       = 4769
-                        EventType     = "Kerberos Service Ticket"
-                    }
-                }
-            )
         } catch { }
 
         $NTLMValidations = @()
@@ -119,49 +68,31 @@ foreach ($DCName in $DCs) {
                     SourceWorkstation = Get-EventDataValue -Event $_ -Name "Workstation"
                     PackageName       = Get-EventDataValue -Event $_ -Name "PackageName"
                     Status            = Get-EventDataValue -Event $_ -Name "Status"
-                    AuthProtocol      = "NTLM"
-                    EventID           = 4776
-                    EventType         = "NTLM Credential Validation"
                 }
             })
         } catch { }
 
         $Kerberos4624Count = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -eq "Kerberos" }).Count
         $NTLM4624Count     = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -match "NTLM" }).Count
-        $Other4624Count    = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -and $_.AuthenticationPackage -notmatch "Kerberos|NTLM" }).Count
         $KerberosTGTCount  = $KerberosTGTRequests.Count
-        $KerberosServiceCount = $KerberosServiceTickets.Count
         $NTLMValidationCount = $NTLMValidations.Count
 
         $AuthProtocolSummary = @(
-            [PSCustomObject]@{ Protocol = "Kerberos - 4624 Logon Package"; Count = $Kerberos4624Count; Notes = "Successful logons using Kerberos package" }
-            [PSCustomObject]@{ Protocol = "NTLM - 4624 Logon Package"; Count = $NTLM4624Count; Notes = "Successful logons using NTLM package" }
-            [PSCustomObject]@{ Protocol = "Other - 4624 Logon Package"; Count = $Other4624Count; Notes = "Other successful logon packages" }
-            [PSCustomObject]@{ Protocol = "Kerberos - TGT Requests 4768"; Count = $KerberosTGTCount; Notes = "Kerberos ticket-granting-ticket requests" }
-            [PSCustomObject]@{ Protocol = "Kerberos - Service Tickets 4769"; Count = $KerberosServiceCount; Notes = "Kerberos service ticket requests" }
-            [PSCustomObject]@{ Protocol = "NTLM - Credential Validation 4776"; Count = $NTLMValidationCount; Notes = "NTLM validations handled by this DC" }
+            [PSCustomObject]@{ Protocol = "Kerberos - 4624"; Count = $Kerberos4624Count }
+            [PSCustomObject]@{ Protocol = "NTLM - 4624"; Count = $NTLM4624Count }
+            [PSCustomObject]@{ Protocol = "Kerberos - TGT 4768"; Count = $KerberosTGTCount }
+            [PSCustomObject]@{ Protocol = "NTLM - Validations 4776"; Count = $NTLMValidationCount }
         )
 
-        $TopAuthenticatedUsers = @($SuccessfulLogons | Where-Object { $_.UserName -and $_.UserName -notmatch "Unable to check" } | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count } })
-        
-        $TopSourceComputers = @($SuccessfulLogons | Where-Object { $_.SourceWorkstation -and $_.SourceWorkstation -notin @("-", "Unknown", "") } | Group-Object SourceWorkstation | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ SourceWorkstation = $_.Name; Count = $_.Count } })
-        
-        $RecentNTLMUsers = @($NTLMValidations | Where-Object { $_.UserName -and -not (Test-IsComputerAccount $_.UserName) } | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count; Status = "WARNING - NTLM observed" } })
-
-        $RecentKerberosUsers = @($KerberosTGTRequests | Where-Object { $_.UserName -and -not (Test-IsComputerAccount $_.UserName) } | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count; Status = "OK - Kerberos observed" } })
+        $TopAuthenticatedUsers = @($SuccessfulLogons | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count } })
+        $RecentNTLMUsers = @($NTLMValidations | Where-Object { $_.UserName -and -not (Test-IsComputerAccount $_.UserName) } | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count } })
 
         [PSCustomObject]@{
             ServerName            = $Computer
             FQDN                  = $TargetDC
             AuthProtocolSummary   = $AuthProtocolSummary
             TopAuthenticatedUsers = $TopAuthenticatedUsers
-            TopSourceComputers    = $TopSourceComputers
-            RecentKerberosUsers   = $RecentKerberosUsers
             RecentNTLMUsers       = $RecentNTLMUsers
-            SuccessfulLogons      = $SuccessfulLogons
-            KerberosTGTRequests   = $KerberosTGTRequests
-            KerberosServiceTickets= $KerberosServiceTickets
-            NTLMValidations       = $NTLMValidations
         }
     } -ErrorAction SilentlyContinue
 

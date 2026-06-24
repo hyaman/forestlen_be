@@ -18,8 +18,10 @@ namespace ForestIQ
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Add services to the container.
+
             builder.Services.AddControllers();
-            
+            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
 
@@ -94,21 +96,23 @@ namespace ForestIQ
                 options.AddSecurityRequirement(
                     new OpenApiSecurityRequirement
                     {
-                        {
-                            new OpenApiSecurityScheme
-                            {
-                                Reference = new OpenApiReference
-                                {
-                                    Type = ReferenceType.SecurityScheme,
-                                    Id = "Bearer"
-                                }
-                            },
-                             Array.Empty<string>()
+            {
+                new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
                     }
+                },
+                Array.Empty<string>()
+            }
                     });
             });
 
             builder.Services.AddAuthorization();
+
+            //builder.WebHost.UseUrls(["http://0.0.0.0:80"]);
 
             var app = builder.Build();
 

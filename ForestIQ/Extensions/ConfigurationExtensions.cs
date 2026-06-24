@@ -18,14 +18,6 @@ namespace ForestIQ.Extensions
             var enc = new EncryptionSettings();
             configuration.GetSection("Encryption").Bind(enc);
             Runtime.Encryption = enc;
-
-            var cache = new CacheSettings();
-            configuration.GetSection("CacheSettings").Bind(cache);
-            Runtime.Cache = cache;
-
-            var debug = new DebugSettings();
-            configuration.GetSection("Debug").Bind(debug);
-            Runtime.Debug = debug;
         }
     }
 }
