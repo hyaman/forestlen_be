@@ -44,11 +44,10 @@ foreach ($DCName in $DCs) {
         param($TargetDomain, $TargetDC, $AuthLookBackHours)
         $Computer = $env:COMPUTERNAME
         $AuthStartTime = (Get-Date).AddHours(-$AuthLookBackHours)
-
-        function Get-EventDataValue {
-            param([System.Diagnostics.Eventing.Reader.EventRecord]$Event, [string]$Name)
-            try { return ([xml]$Event.ToXml()).Event.EventData.Data | Where-Object { $_.Name -eq $Name } | Select-Object -ExpandProperty "#text" } catch { return $null }
-        }
+        
+        $Timings = [System.Collections.Generic.List[object]]::new()
+        $totalSw = [System.Diagnostics.Stopwatch]::StartNew()
+        $sw = [System.Diagnostics.Stopwatch]::new()
 
         function Test-IsComputerAccount {
             param([string]$Name)
@@ -56,82 +55,88 @@ foreach ($DCName in $DCs) {
             return $Name.EndsWith('$')
         }
 
-        $SuccessfulLogons = @()
+        # Event Collection
+        $sw.Restart()
+        $AllEvents = @()
         try {
-            $SuccessfulLogons = @(Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=4624; StartTime=$AuthStartTime } -ErrorAction Stop | ForEach-Object {
-                $TargetUserName = Get-EventDataValue -Event $_ -Name "TargetUserName"
-                if ($TargetUserName -and -not (Test-IsComputerAccount $TargetUserName) -and $TargetUserName -notin @("ANONYMOUS LOGON", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")) {
-                    [PSCustomObject]@{
-                        TimeCreated           = $_.TimeCreated
-                        UserName              = "$(Get-EventDataValue -Event $_ -Name "TargetDomainName")\$TargetUserName"
-                        LogonType             = Get-EventDataValue -Event $_ -Name "LogonType"
-                        SourceIP              = Get-EventDataValue -Event $_ -Name "IpAddress"
-                        SourceWorkstation     = Get-EventDataValue -Event $_ -Name "WorkstationName"
-                        AuthenticationPackage = Get-EventDataValue -Event $_ -Name "AuthenticationPackageName"
-                        LogonProcess          = Get-EventDataValue -Event $_ -Name "LogonProcessName"
-                    }
-                }
+            $AllEvents = @(Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=@(4624, 4768, 4769, 4776); StartTime=$AuthStartTime } -ErrorAction SilentlyContinue)
+        } catch { }
+        
+        $Events4624 = [System.Collections.Generic.List[object]]::new()
+        $Events4768 = [System.Collections.Generic.List[object]]::new()
+        $Events4769 = [System.Collections.Generic.List[object]]::new()
+        $Events4776 = [System.Collections.Generic.List[object]]::new()
+
+        # Helper to safely pull property values without XML parsing
+        function Get-EvtProp {
+            param($Event, [int]$Index)
+            try { return $Event.Properties[$Index].Value } catch { return $null }
+        }
+
+        foreach ($evt in $AllEvents) {
+            switch ($evt.Id) {
+                4624 { $Events4624.Add($evt) }
+                4768 { $Events4768.Add($evt) }
+                4769 { $Events4769.Add($evt) }
+                4776 { $Events4776.Add($evt) }
+            }
+        }
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Event Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
+
+        # Successful Logons Processing
+        $sw.Restart()
+        $SuccessfulLogons = [System.Collections.Generic.List[object]]::new()
+        foreach ($evt in $Events4624) {
+            $TargetUserName = Get-EvtProp $evt 5
+            if ($TargetUserName -and -not (Test-IsComputerAccount $TargetUserName) -and $TargetUserName -notin @("ANONYMOUS LOGON", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")) {
+                $Domain = Get-EvtProp $evt 6
+                $SuccessfulLogons.Add([PSCustomObject]@{
+                    UserName              = "$Domain\$TargetUserName"
+                    AuthenticationPackage = Get-EvtProp $evt 10
+                    SourceWorkstation     = Get-EvtProp $evt 11
+                    TimeCreated           = $evt.TimeCreated
+                })
+            }
+        }
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Successful Logons Processing'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
+
+        # Kerberos TGT Processing
+        $sw.Restart()
+        $KerberosTGTRequests = [System.Collections.Generic.List[object]]::new()
+        foreach ($evt in $Events4768) {
+            $KerberosTGTRequests.Add([PSCustomObject]@{
+                UserName      = Get-EvtProp $evt 0
             })
-        } catch { }
+        }
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Kerberos TGT Processing'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
-        $KerberosTGTRequests = @()
-        try {
-            $KerberosTGTRequests = @(Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=4768; StartTime=$AuthStartTime } -ErrorAction Stop | ForEach-Object {
-                [PSCustomObject]@{
-                    TimeCreated   = $_.TimeCreated
-                    UserName      = Get-EventDataValue -Event $_ -Name "TargetUserName"
-                    SourceIP      = Get-EventDataValue -Event $_ -Name "IpAddress"
-                    Status        = Get-EventDataValue -Event $_ -Name "Status"
-                    TicketOptions = Get-EventDataValue -Event $_ -Name "TicketOptions"
-                    AuthProtocol  = "Kerberos"
-                    EventID       = 4768
-                    EventType     = "Kerberos TGT Request"
-                }
+        # Kerberos Service Ticket Processing
+        $sw.Restart()
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Kerberos Service Ticket Processing'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
+
+        # NTLM Validation Processing
+        $sw.Restart()
+        $NTLMValidations = [System.Collections.Generic.List[object]]::new()
+        foreach ($evt in $Events4776) {
+            $NTLMValidations.Add([PSCustomObject]@{
+                UserName          = Get-EvtProp $evt 1
             })
-        } catch { }
+        }
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'NTLM Validation Processing'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
-        $KerberosServiceTickets = @()
-        try {
-            $KerbServiceEvents = Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=4769; StartTime=$AuthStartTime } -ErrorAction Stop
-            $KerberosServiceTickets = @(
-                $KerbServiceEvents | ForEach-Object {
-                    [PSCustomObject]@{
-                        TimeCreated   = $_.TimeCreated
-                        UserName      = Get-EventDataValue -Event $_ -Name "TargetUserName"
-                        ServiceName   = Get-EventDataValue -Event $_ -Name "ServiceName"
-                        SourceIP      = Get-EventDataValue -Event $_ -Name "IpAddress"
-                        Status        = Get-EventDataValue -Event $_ -Name "Status"
-                        TicketOptions = Get-EventDataValue -Event $_ -Name "TicketOptions"
-                        AuthProtocol  = "Kerberos"
-                        EventID       = 4769
-                        EventType     = "Kerberos Service Ticket"
-                    }
-                }
-            )
-        } catch { }
-
-        $NTLMValidations = @()
-        try {
-            $NTLMValidations = @(Get-WinEvent -FilterHashtable @{ LogName="Security"; Id=4776; StartTime=$AuthStartTime } -ErrorAction Stop | ForEach-Object {
-                [PSCustomObject]@{
-                    TimeCreated       = $_.TimeCreated
-                    UserName          = Get-EventDataValue -Event $_ -Name "TargetUserName"
-                    SourceWorkstation = Get-EventDataValue -Event $_ -Name "Workstation"
-                    PackageName       = Get-EventDataValue -Event $_ -Name "PackageName"
-                    Status            = Get-EventDataValue -Event $_ -Name "Status"
-                    AuthProtocol      = "NTLM"
-                    EventID           = 4776
-                    EventType         = "NTLM Credential Validation"
-                }
-            })
-        } catch { }
-
+        # Summary Generation
+        $sw.Restart()
         $Kerberos4624Count = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -eq "Kerberos" }).Count
         $NTLM4624Count     = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -match "NTLM" }).Count
         $Other4624Count    = @($SuccessfulLogons | Where-Object { $_.AuthenticationPackage -and $_.AuthenticationPackage -notmatch "Kerberos|NTLM" }).Count
-        $KerberosTGTCount  = $KerberosTGTRequests.Count
-        $KerberosServiceCount = $KerberosServiceTickets.Count
-        $NTLMValidationCount = $NTLMValidations.Count
+        $KerberosTGTCount  = $Events4768.Count
+        $KerberosServiceCount = $Events4769.Count
+        $NTLMValidationCount = $Events4776.Count
 
         $AuthProtocolSummary = @(
             [PSCustomObject]@{ Protocol = "Kerberos - 4624 Logon Package"; Count = $Kerberos4624Count; Notes = "Successful logons using Kerberos package" }
@@ -150,6 +155,44 @@ foreach ($DCName in $DCs) {
 
         $RecentKerberosUsers = @($KerberosTGTRequests | Where-Object { $_.UserName -and -not (Test-IsComputerAccount $_.UserName) } | Group-Object UserName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { [PSCustomObject]@{ UserName = $_.Name; Count = $_.Count; Status = "OK - Kerberos observed" } })
 
+        $LogonsOverTime = @()
+
+        for ($i = $AuthLookBackHours - 1; $i -ge 0; $i--) {
+
+            $Start = (Get-Date).Date.AddHours((Get-Date).Hour - $i)
+            $End   = $Start.AddHours(1)
+
+            $KerberosCount = @(
+                $SuccessfulLogons |
+                Where-Object {
+                    $_.TimeCreated -ge $Start -and
+                    $_.TimeCreated -lt $End -and
+                    $_.AuthenticationPackage -eq "Kerberos"
+                }
+            ).Count
+
+            $NTLMCount = @(
+                $SuccessfulLogons |
+                Where-Object {
+                    $_.TimeCreated -ge $Start -and
+                    $_.TimeCreated -lt $End -and
+                    $_.AuthenticationPackage -match "NTLM"
+                }
+            ).Count
+
+            $LogonsOverTime += [PSCustomObject]@{
+                Time      = $Start.ToString("h tt")
+                Kerberos  = $KerberosCount
+                NTLM      = $NTLMCount
+            }
+        }
+
+        $sw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Summary Generation'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
+        
+        $totalSw.Stop()
+        $Timings.Add([pscustomobject]@{ Section = 'Total Execution'; ElapsedMilliseconds = $totalSw.ElapsedMilliseconds })
+
         [PSCustomObject]@{
             ServerName            = $Computer
             FQDN                  = $TargetDC
@@ -158,10 +201,12 @@ foreach ($DCName in $DCs) {
             TopSourceComputers    = $TopSourceComputers
             RecentKerberosUsers   = $RecentKerberosUsers
             RecentNTLMUsers       = $RecentNTLMUsers
-            SuccessfulLogons      = $SuccessfulLogons
-            KerberosTGTRequests   = $KerberosTGTRequests
-            KerberosServiceTickets= $KerberosServiceTickets
-            NTLMValidations       = $NTLMValidations
+            LogonsOverTime        = $LogonsOverTime
+            SuccessfulLogons      = $SuccessfulLogons.Count
+            KerberosTGTRequests   = $Events4768.Count
+            KerberosServiceTickets= $Events4769.Count
+            NTLMValidations       = $Events4776.Count
+            PerformanceMetrics    = $Timings
         }
     } -ErrorAction SilentlyContinue
 

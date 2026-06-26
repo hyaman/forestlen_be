@@ -64,6 +64,22 @@ namespace ForestIQ.Controllers
             return Ok(ApiResponse<object>.Ok(result));
         }
 
+        [HttpPost("performance")]
+        public async Task<IActionResult> GetPerformance([FromBody] DashboardFilterRequest request)
+        {
+            if (string.IsNullOrEmpty(request.TargetDc))
+            {
+                return BadRequest(ApiResponse<object>.Fail("TargetDC is required for performance metrics."));
+            }
+
+            var result = await _dashboardService.GetDcPerformanceAsync(request);
+            if (result == null)
+            {
+                return StatusCode(500, ApiResponse<object>.Fail("Failed to retrieve performance data."));
+            }
+            return Ok(ApiResponse<object>.Ok(result));
+        }
+
         [HttpGet("hierarchy")]
         public async Task<IActionResult> GetHierarchy([FromQuery] string domain = "All", [FromQuery] string site = "All", [FromQuery] bool refreshView = false)
         {
@@ -127,6 +143,17 @@ namespace ForestIQ.Controllers
             }
 
             return Ok(ApiResponse<List<ForestHierarchyModel>>.Ok(forests));
+        }
+
+        [HttpGet("default-dc")]
+        public async Task<IActionResult> GetDefaultDc([FromQuery] string domain = "", [FromQuery] bool refreshView = false)
+        {
+            var result = await _dashboardService.GetDefaultDcAsync(domain, refreshView);
+            if (result == null)
+            {
+                return StatusCode(500, ApiResponse<object>.Fail("Failed to retrieve default DC data."));
+            }
+            return Ok(ApiResponse<object>.Ok(result));
         }
     }
 }

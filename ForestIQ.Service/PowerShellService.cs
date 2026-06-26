@@ -406,6 +406,36 @@ namespace ForestIQ.Service
             return await ExecutePowerShellAsync(powerShellConnectionRequest, GetExecutionScript(), "execute-script", request.Script);
         }
 
+        public async Task<PowerShellExecutionResult> ExecuteBackgroundScriptAsync(AdConfiguration config, string scriptContent)
+        {
+            if (string.IsNullOrWhiteSpace(scriptContent))
+            {
+                return new PowerShellExecutionResult
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status400BadRequest,
+                    Message = "Script cannot be empty."
+                };
+            }
+
+            var request = new PowerShellRequest
+            {
+                DomainName = config.ForestName,
+                RemoteHost = config.RemoteHost,
+                UserName = config.UserName,
+                Password = _encryptionService.Unprotect(config.EncryptedPassword),
+                DnsServer = JsonSerializer.Deserialize<List<string>>(config.DnsServersJson ?? "[]").FirstOrDefault(),
+                Action = "execute-background-script"
+            };
+
+
+            _logger.LogInformation("Connect Step 1: Configuring Container DNS...");
+            var dnsSetupResult = await ConfigureContainerDnsAsync(request);
+            _logger.LogInformation("Connect Step 1 Result: {Success} (Status: {StatusCode}) | Error: {Error}", dnsSetupResult.Success, dnsSetupResult.StatusCode, dnsSetupResult.Error ?? "None");
+
+            return await ExecutePowerShellAsync(request, GetExecutionScript(), "execute-background-script", scriptContent);
+        }
+
         public IEnumerable<PowerShellCommandDefinition> GetAvailableCommands()
         {
             var connection = CheckAndGetSession();
@@ -1076,7 +1106,7 @@ namespace ForestIQ.Service
 
             var remoteHost = request.RemoteHost;
 
-            if (scriptPrefix != "connect" && !isDebug)
+            if (scriptPrefix != "connect" && (!isDebug || string.IsNullOrWhiteSpace(request.KerberosCachePath)))
             {
                 var ticketReady = await EnsureKerberosTicketAsync(request);
                 if (!ticketReady.Success)

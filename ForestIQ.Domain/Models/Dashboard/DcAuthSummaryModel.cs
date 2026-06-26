@@ -27,17 +27,23 @@ namespace ForestIQ.Domain.Models.Dashboard
         [JsonPropertyName("TopSourceComputers")]
         public List<SourceComputerData>? TopSourceComputers { get; set; }
 
+        [JsonPropertyName("LogonsOverTime")]
+        public List<LogonOverTimeData>? LogonsOverTime { get; set; }
+
         [JsonPropertyName("SuccessfulLogons")]
-        public List<AuthEventData>? SuccessfulLogons { get; set; }
+        public int? SuccessfulLogons { get; set; }
 
         [JsonPropertyName("KerberosTGTRequests")]
-        public List<AuthEventData>? KerberosTGTRequests { get; set; }
+        public int? KerberosTGTRequests { get; set; }
 
         [JsonPropertyName("KerberosServiceTickets")]
-        public List<AuthEventData>? KerberosServiceTickets { get; set; }
+        public int? KerberosServiceTickets { get; set; }
 
         [JsonPropertyName("NTLMValidations")]
-        public List<AuthEventData>? NTLMValidations { get; set; }
+        public int? NTLMValidations { get; set; }
+
+        [JsonPropertyName("PerformanceMetrics")]
+        public List<PerformanceMetricData>? PerformanceMetrics { get; set; }
     }
 
     public class SourceComputerData
@@ -110,5 +116,20 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("Count")]
         public int? Count { get; set; }
+
+        [JsonPropertyName("Status")]
+        public string? Status { get; set; }
+    }
+
+    public class LogonOverTimeData
+    {
+        [JsonPropertyName("Time")]
+        public string? Time { get; set; }
+
+        [JsonPropertyName("Kerberos")]
+        public int? Kerberos { get; set; }
+
+        [JsonPropertyName("NTLM")]
+        public int? NTLM { get; set; }
     }
 }

@@ -8,7 +8,7 @@ $results = @()
 $Forest = $null
 
 try {
-    $Forest = Get-ADForest
+    $Forest = Get-ADForest -Credential $cred
 } catch {
     Write-Error "Failed to get AD Forest."
     return $results

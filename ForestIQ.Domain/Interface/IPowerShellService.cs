@@ -21,6 +21,8 @@ namespace ForestIQ.Domain.Interface
 
         Task<PowerShellExecutionResult> ExecuteScriptAsync(PowerShellScriptRequest request);
 
+        Task<PowerShellExecutionResult> ExecuteBackgroundScriptAsync(AdConfiguration config, string scriptContent);
+
         IEnumerable<PowerShellCommandDefinition> GetAvailableCommands();
 
         Task<DomainDiscoveryResponse> DiscoverHostsAsync(PowerShellRequest request);

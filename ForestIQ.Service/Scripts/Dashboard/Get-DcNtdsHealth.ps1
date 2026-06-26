@@ -38,34 +38,67 @@ if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
 $results = @()
 
 foreach ($DCName in $DCs) {
-    $RemoteData = Invoke-Command -ComputerName $DCName -Credential $cred -ArgumentList $TargetDomain, $DCName -ScriptBlock {
-        param($TargetDomain, $TargetDC)
-        $Computer = $env:COMPUTERNAME
+    try {
+        $RemoteData = Invoke-Command -ComputerName $DCName -Credential $cred -ArgumentList $TargetDomain, $DCName -ErrorAction Stop -ScriptBlock {
+            param($TargetDomain, $TargetDC)
+            $Computer = $env:COMPUTERNAME
 
-        $NTDSEvents = @()
-        try {
-            $NTDSEvents = @(Get-WinEvent -FilterHashtable @{ LogName="Directory Service"; Level=2; StartTime=(Get-Date).AddDays(-7) } -ErrorAction Stop)
-        } catch { }
-
-        $NTDSEventSummary = @(
-            $NTDSEvents | Select-Object -First 10 | ForEach-Object {
-                [PSCustomObject]@{
-                    TimeCreated = $_.TimeCreated
-                    EventID     = $_.Id
-                    Provider    = $_.ProviderName
-                    Message     = ($_.Message -replace "`r|`n", " ")
-                }
+            $NTDSEvents = @()
+            try {
+                $NTDSEvents = @(Get-WinEvent -FilterHashtable @{ LogName="Directory Service"; Level=2; StartTime=(Get-Date).AddDays(-7) } -ErrorAction Stop)
+            } catch { 
+            
+                 if ($_.Exception.Message -like "*No events were found*") {
+                     $NTDSEvents = @()
+                 }
+                 else {
+                     $Health = "ERROR"
+                     $NTDSEvents = @(
+                         [PSCustomObject]@{
+                             TimeCreated  = Get-Date
+                             Id           = -1
+                             ProviderName = "ForestIQ"
+                             Message      = "Failed to query Directory Service event log. Exception: $($_.Exception.Message)"
+                         }
+                     )
+                 }
             }
-        )
 
-        [PSCustomObject]@{
-            ServerName       = $Computer
-            FQDN             = $TargetDC
-            Health           = if ($NTDSEvents.Count -gt 0) { "WARNING" } else { "OK" }
-            ErrorsLast7Days  = $NTDSEvents.Count
-            RecentErrors     = $NTDSEventSummary
+            $NTDSEventSummary = @(
+                $NTDSEvents | Select-Object -First 10 | ForEach-Object {
+                    [PSCustomObject]@{
+                        TimeCreated = $_.TimeCreated
+                        EventID     = $_.Id
+                        Provider    = $_.ProviderName
+                        Message     = ($_.Message -replace "`r|`n", " ")
+                    }
+                }
+            )
+
+            [PSCustomObject]@{
+                ServerName       = $Computer
+                FQDN             = $TargetDC
+                Health           = if ($NTDSEvents.Count -gt 0) { "WARNING" } else { "OK" }
+                ErrorsLast7Days  = $NTDSEvents.Count
+                RecentErrors     = $NTDSEventSummary
+            }
         }
-    } -ErrorAction SilentlyContinue
+    } catch {
+        $RemoteData = [PSCustomObject]@{
+            ServerName       = $DCName
+            FQDN             = $DCName
+            Health           = "ERROR"
+            ErrorsLast7Days  = 0
+            RecentErrors     = @(
+                [PSCustomObject]@{
+                    TimeCreated = Get-Date
+                    EventID     = -1
+                    Provider    = "WinRM"
+                    Message     = "Failed to connect to DC via WinRM: $($_.Exception.Message)"
+                }
+            )
+        }
+    }
 
     if ($RemoteData) {
         $results += $RemoteData

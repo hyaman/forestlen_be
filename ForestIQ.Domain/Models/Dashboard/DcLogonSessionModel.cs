@@ -14,6 +14,12 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("LiveSessions")]
         public List<LiveSessionData>? LiveSessions { get; set; }
+
+        [JsonPropertyName("Error")]
+        public string? Error { get; set; }
+
+        [JsonPropertyName("RawOutput")]
+        public string? RawOutput { get; set; }
     }
 
     public class LiveSessionData

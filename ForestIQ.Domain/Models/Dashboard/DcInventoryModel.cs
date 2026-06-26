@@ -6,6 +6,15 @@ using ForestIQ.Domain.Models.PowerShell;
 
 namespace ForestIQ.Domain.Models.Dashboard
 {
+    public class DcInventoryResponseModel
+    {
+        [JsonPropertyName("GeneratedAt")]
+        public DateTime? GeneratedAt { get; set; }
+
+        [JsonPropertyName("InventoryResults")]
+        public List<DcInventoryModel>? InventoryResults { get; set; }
+    }
+
     // Intended to be reused when script results are stored in the database in the future.
     public class DcInventoryModel
     {
@@ -29,6 +38,21 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("PortConnectivity")]
         public List<PortConnectivityData>? PortConnectivity { get; set; }
+
+        [JsonPropertyName("HealthSummary")]
+        public HealthSummaryData? HealthSummary { get; set; }
+
+        [JsonPropertyName("PerformanceMetrics")]
+        public List<PerformanceMetricData>? PerformanceMetrics { get; set; }
+
+        [JsonPropertyName("TopDirectories")]
+        public List<TopDirectoryData>? TopDirectories { get; set; }
+
+        [JsonPropertyName("Error")]
+        public string? Error { get; set; }
+
+        [JsonPropertyName("RawOutput")]
+        public string? RawOutput { get; set; }
     }
 
     public class PortConnectivityData
@@ -171,6 +195,21 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("PendingUpdates")]
         public JsonElement? PendingUpdates { get; set; }
+
+        [JsonPropertyName("SysvolReplicationStatus")]
+        public string? SysvolReplicationStatus { get; set; }
+
+        [JsonPropertyName("LdapSigning")]
+        public string? LdapSigning { get; set; }
+
+        [JsonPropertyName("SmbSigning")]
+        public string? SmbSigning { get; set; }
+
+        [JsonPropertyName("ADWSStatus")]
+        public string? ADWSStatus { get; set; }
+
+        [JsonPropertyName("W32TimeStatus")]
+        public string? W32TimeStatus { get; set; }
     }
 
     public class DiskData
@@ -312,5 +351,38 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("Description")]
         public string? Description { get; set; }
+    }
+
+    public class HealthSummaryData
+    {
+        [JsonPropertyName("DiskHealth")]
+        public string? DiskHealth { get; set; }
+
+        [JsonPropertyName("ServiceHealth")]
+        public string? ServiceHealth { get; set; }
+
+        [JsonPropertyName("CertificateHealth")]
+        public string? CertificateHealth { get; set; }
+
+        [JsonPropertyName("PortHealth")]
+        public string? PortHealth { get; set; }
+    }
+
+    public class PerformanceMetricData
+    {
+        [JsonPropertyName("Section")]
+        public string? Section { get; set; }
+
+        [JsonPropertyName("ElapsedMilliseconds")]
+        public long? ElapsedMilliseconds { get; set; }
+    }
+
+    public class TopDirectoryData
+    {
+        [JsonPropertyName("Path")]
+        public string? Path { get; set; }
+
+        [JsonPropertyName("SizeGB")]
+        public JsonElement? SizeGB { get; set; }
     }
 }
