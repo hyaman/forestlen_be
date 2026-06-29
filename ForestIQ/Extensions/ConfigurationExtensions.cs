@@ -26,6 +26,10 @@ namespace ForestIQ.Extensions
             var debug = new DebugSettings();
             configuration.GetSection("Debug").Bind(debug);
             Runtime.Debug = debug;
+
+            var bgJobs = new BackgroundJobSettings();
+            configuration.GetSection("BackgroundJobs").Bind(bgJobs);
+            Runtime.BackgroundJobs = bgJobs;
         }
     }
 }

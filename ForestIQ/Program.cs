@@ -46,35 +46,27 @@ namespace ForestIQ
             var connectionString = builder.Configuration.GetConnectionString("ForestIqSqlite") ?? "Data Source=forestiq.db";
             builder.Services.AddDbContext<ForestIqDbContext>(options => options.UseSqlite(connectionString));
 
-            builder.Services.AddSingleton<IKerberosService, KerberosService>();
-            builder.Services.AddSingleton<IAdConnectionCache, AdConnectionCache>();
-            builder.Services.AddSingleton<IJwtService, JwtService>();
-            builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
-            builder.Services.AddScoped<IConfigureRepository, ConfigureRepository>();
-            builder.Services.AddScoped<IConfigureService, ConfigureService>();
-            builder.Services.AddScoped<IPowerShellService, PowerShellService>();
-            builder.Services.AddScoped<IDashboardService, DashboardService>();
-            builder.Services.AddScoped<IUserRepository, UserRepository>();
-            builder.Services.AddScoped<IUserService, UserService>();
-            builder.Services.AddScoped<IPerformanceHistoryRepository, PerformanceHistoryRepository>();
+            // Register application services
+            builder.Services.RegisterApplicationServices();
 
-            //var rawHangfireConn = builder.Configuration.GetConnectionString("HangfireSqlite") ?? "Data Source=hangfire.db;";
-            //if (!rawHangfireConn.Contains(";")) 
-            //{
-            //    rawHangfireConn += ";";
-            //}
+            #region Hangfire
 
-            //builder.Services.AddHangfire(configuration => configuration
-            //    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-            //    .UseSimpleAssemblyNameTypeSerializer()
-            //    .UseRecommendedSerializerSettings()
-            //    .UseSQLiteStorage(rawHangfireConn, new SQLiteStorageOptions()));
+            var rawHangfireConn = builder.Configuration.GetConnectionString("HangfireSqlite") ?? "Data Source=hangfire.db;";
 
-            //builder.Services.AddHangfireServer(options =>
-            //{
-            //    options.WorkerCount = 1;
-            //});
+            builder.Services.AddHangfire(configuration => configuration
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings()
+                .UseSQLiteStorage(rawHangfireConn, new SQLiteStorageOptions()));
 
+            builder.Services.AddHangfireServer(options =>
+            {
+                options.WorkerCount = 1;
+            });
+
+            #endregion
+
+            #region Jwt Authentication
             var key = Encoding.UTF8.GetBytes(Runtime.Jwt.Key);
 
             builder.Services
@@ -99,7 +91,9 @@ namespace ForestIQ
                                 new SymmetricSecurityKey(key)
                         };
                 });
+            #endregion
 
+            #region Swagger Configuration
             builder.Services.AddSwaggerGen(options =>
             {
                 options.AddSecurityDefinition("Bearer",
@@ -131,7 +125,11 @@ namespace ForestIQ
 
             builder.Services.AddAuthorization();
 
+            #endregion
+
             var app = builder.Build();
+
+            #region Migrate Database and Seed Super Admin
 
             using (var scope = app.Services.CreateScope())
             {
@@ -152,24 +150,31 @@ namespace ForestIQ
                 }
             }
 
+            #endregion
+            
             app.UseSwagger();
             app.UseSwaggerUI();
 
             app.UseCors("AllowPolicy");
 
-            //app.UseHttpsRedirection();
+            app.UseHttpsRedirection();
+
+            app.UseDefaultFiles();
+            app.UseStaticFiles();
 
             app.UseMiddleware<ExceptionMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();
+
+            app.UseHangfireDashboard("/api/hangfire", new DashboardOptions
+            {
+                Authorization = new[] { new HangfireAuthorizationFilter() }
+            });
             
-            //app.UseHangfireDashboard("/hangfire", new DashboardOptions
-            //{
-            //    Authorization = new[] { new HangfireAuthorizationFilter() }
-            //});
-            //RecurringJob.AddOrUpdate<PerformancePollingJob>("poll-performance", job => job.ExecuteAsync(), "*/15 * * * *");
+            app.ScheduleRecurringJobs();
 
             app.MapControllers();
+            app.MapFallbackToFile("index.html");
 
             app.Run();
         }

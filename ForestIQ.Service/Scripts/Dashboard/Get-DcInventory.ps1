@@ -5,7 +5,7 @@ $cred = New-Object System.Management.Automation.PSCredential($username, $secureP
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
     $DCs = @()
     try {
-        $Forest = Get-ADForest
+        $Forest = Get-ADForest -Credential $cred
         if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
             $Domains = @()
         } else {
@@ -44,8 +44,8 @@ if ($DCs.Count -eq 0) {
 
 # 1. Parallelize Domain Controller collection using Invoke-Command
 $InvokeErrors = $null
-$results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $TargetDomain -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ScriptBlock {
-    param($TargetDomain)
+$results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $TargetDomain, $cred -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ScriptBlock {
+    param($TargetDomain, $PassedCred)
     
     # 4. Make software inventory optional (defaults to true if not provided by caller)
     if ($null -eq $IncludeApplications) { $IncludeApplications = $true }
@@ -258,7 +258,7 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $sw.Restart()
     $DCInfo = $null
     try {
-        $DCInfo = Get-ADDomainController -Identity $Computer -ErrorAction Stop
+        $DCInfo = Get-ADDomainController -Identity $Computer -Credential $PassedCred -ErrorAction Stop
     } catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'DC Information Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })

@@ -5,7 +5,7 @@ $cred = New-Object System.Management.Automation.PSCredential($username, $secureP
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
     $DCs = @()
     try {
-        $Forest = Get-ADForest
+        $Forest = Get-ADForest -Credential $cred
         $Domains = $Forest.Domains
         foreach ($DomainName in $Domains) {
             $DomainDCs = Get-ADDomainController -Server $DomainName -Credential $cred -Filter *
@@ -26,7 +26,7 @@ $results = @()
 foreach ($DCName in $DCs) {
     $RemoteData = Invoke-Command -ComputerName $DCName -Credential $cred -ArgumentList $TargetDomain, $DCName -ScriptBlock {
         param($TargetDomain, $TargetDC)
-        $Computer = $env:COMPUTERNAME
+        $Computer = $TargetDC
 
         try {
             # Let the initial WinRM session startup spike subside slightly
@@ -60,22 +60,50 @@ foreach ($DCName in $DCs) {
             }
 
             # 4. Top 10 Processes by CPU/Memory
-            $Processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 | ForEach-Object {
-                [PSCustomObject]@{
-                    ProcessName = $_.ProcessName + ".exe"
-                    CPUPercent  = if ($_.CPU) { [math]::Round($_.CPU, 2) } else { 0 }
-                    MemoryMB    = [math]::Round($_.WorkingSet64 / 1MB, 1)
-                    Handles     = $_.HandleCount
-                    Threads     = $_.Threads.Count
+            $cores = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+            if (-not $cores -or $cores -eq 0) { $cores = 1 }
+
+            $ProcessCounters = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue
+            if ($ProcessCounters) {
+                $Processes = $ProcessCounters | Where-Object { $_.Name -notmatch "_Total|Idle" } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 10 | ForEach-Object {
+                    [PSCustomObject]@{
+                        ProcessName = ($_.Name -replace '#\d+$', '') + ".exe"
+                        CpuPercent  = [math]::Round(($_.PercentProcessorTime / $cores), 4)
+                        MemoryMB    = [math]::Round(($_.WorkingSet / 1MB), 1)
+                        Handles     = $_.HandleCount
+                        Threads     = $_.ThreadCount
+                    }
+                }
+            } else {
+                # Fallback if performance counters are corrupted/unavailable
+                $Processes = Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 | ForEach-Object {
+                    [PSCustomObject]@{
+                        ProcessName = $_.ProcessName + ".exe"
+                        CpuPercent  = 0
+                        MemoryMB    = [math]::Round($_.WorkingSet64 / 1MB, 1)
+                        Handles     = $_.HandleCount
+                        Threads     = $_.Threads.Count
+                    }
                 }
             }
 
-            # 5. Network I/O (in KB/s)
+            # 5. Network I/O (in Percentage)
             $NetCounters = Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue
             $NetworkIo = 0
             if ($NetCounters) {
-                $TotalBytes = ($NetCounters | Measure-Object BytesTotalPersec -Sum).Sum
-                $NetworkIo = [math]::Round(($TotalBytes / 1KB), 2)
+                $TotalBytes = 0
+                $TotalBandwidth = 0
+                foreach ($adapter in $NetCounters) {
+                    if ($adapter.CurrentBandwidth -gt 0 -and $adapter.Name -notmatch "Loopback|isatap|Teredo") {
+                        $TotalBytes += $adapter.BytesTotalPersec
+                        $TotalBandwidth += ($adapter.CurrentBandwidth / 8) # Convert Bits/sec to Bytes/sec
+                    }
+                }
+                if ($TotalBandwidth -gt 0) {
+                    $NetworkPercent = ($TotalBytes / $TotalBandwidth) * 100
+                    if ($NetworkPercent -gt 100) { $NetworkPercent = 100 }
+                    $NetworkIo = [math]::Round($NetworkPercent, 2)
+                }
             }
 
             [PSCustomObject]@{

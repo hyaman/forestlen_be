@@ -8,6 +8,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using ForestIQ.Domain;
 using ForestIQ.Domain.DTO;
+using ForestIQ.Domain.Enums;
 using ForestIQ.Domain.Interface;
 using ForestIQ.Domain.Models.Dashboard;
 
@@ -19,17 +20,19 @@ namespace ForestIQ.Service
         private readonly ILogger<DashboardService> _logger;
         private readonly IMemoryCache _cache;
         private readonly IPerformanceHistoryRepository _historyRepository;
-
+        private readonly IRefreshHistoryService _refreshHistoryService;
         public DashboardService(
             IPowerShellService powerShellService, 
             ILogger<DashboardService> logger, 
             IMemoryCache cache,
-            IPerformanceHistoryRepository historyRepository)
+            IPerformanceHistoryRepository historyRepository,
+            IRefreshHistoryService refreshHistoryService)
         {
             _powerShellService = powerShellService;
             _logger = logger;
             _cache = cache;
             _historyRepository = historyRepository;
+            _refreshHistoryService = refreshHistoryService;
         }
 
         private async Task<JsonElement?> ExecuteDashboardScriptAsync(string scriptName, string variablesPrepended)
@@ -100,6 +103,12 @@ namespace ForestIQ.Service
                 _cache.Set(cacheKey, finalResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
                 return finalResult;
             }
+
+            if (!filter.RefreshView)
+            {
+                await _refreshHistoryService.AddRefreshHistoryAsync(SectionName.DeepDcDiscovery, null);
+            }
+
 
             var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcInventory.ps1", vars);
@@ -281,7 +290,7 @@ namespace ForestIQ.Service
             return mappedResult;
         }
 
-        public async Task<DcPerformanceResponseModel?> GetDcPerformanceAsync(DashboardFilterRequest filter)
+        public async Task<List<DcPerformanceResponseModel>?> GetDcPerformanceAsync(DashboardFilterRequest filter)
         {
             string cacheKey = $"Dashboard_Performance_{filter.TargetDc}";
             
@@ -292,17 +301,45 @@ namespace ForestIQ.Service
             
             if (!result.HasValue) return null;
 
-            var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(result.Value.GetRawText());
-            var history = await _historyRepository.GetHistoryAsync(filter.TargetDc ?? "");
+            var rawText = result.Value.GetRawText();
+            var responses = new List<DcPerformanceResponseModel>();
 
-            var response = new DcPerformanceResponseModel
+            using var doc = JsonDocument.Parse(rawText);
+            var root = doc.RootElement;
+
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+            if (root.ValueKind == JsonValueKind.Array)
             {
-                ServerName = filter.TargetDc,
-                LiveStats = liveStats,
-                History = history
-            };
+                foreach (var item in root.EnumerateArray())
+                {
+                    var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(item.GetRawText(), options);
+                    var serverName = item.TryGetProperty("ServerName", out var sn) ? sn.GetString() : filter.TargetDc;
+                    var history = await _historyRepository.GetHistoryAsync(serverName ?? "");
 
-            return response;
+                    responses.Add(new DcPerformanceResponseModel
+                    {
+                        ServerName = serverName,
+                        LiveStats = liveStats,
+                        History = history
+                    });
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(rawText, options);
+                var serverName = root.TryGetProperty("ServerName", out var sn) ? sn.GetString() : filter.TargetDc;
+                var history = await _historyRepository.GetHistoryAsync(serverName ?? "");
+
+                responses.Add(new DcPerformanceResponseModel
+                {
+                    ServerName = serverName,
+                    LiveStats = liveStats,
+                    History = history
+                });
+            }
+
+            return responses;
         }
 
         public async Task<List<DcHierarchyRawModel>?> GetDcHierarchyAsync(string domainFilter = "All", string siteFilter = "All", bool refreshView = false)

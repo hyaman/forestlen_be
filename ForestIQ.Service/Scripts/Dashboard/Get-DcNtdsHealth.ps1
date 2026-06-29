@@ -5,7 +5,7 @@ $cred = New-Object System.Management.Automation.PSCredential($username, $secureP
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
     $DCs = @()
     try {
-        $Forest = Get-ADForest
+        $Forest = Get-ADForest -Credential $cred
         if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
             $Domains = @()
         } else {

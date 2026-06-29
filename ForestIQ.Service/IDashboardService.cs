@@ -12,7 +12,7 @@ namespace ForestIQ.Service
         Task<List<DcLogonSessionModel>?> GetDcLogonSessionsAsync(DashboardFilterRequest filter);
         Task<List<DcAuthSummaryModel>?> GetDcAuthSummaryAsync(DashboardFilterRequest filter);
         Task<List<DcNtdsHealthModel>?> GetDcNtdsHealthAsync(DashboardFilterRequest filter);
-        Task<DcPerformanceResponseModel?> GetDcPerformanceAsync(DashboardFilterRequest filter);
+        Task<List<DcPerformanceResponseModel>?> GetDcPerformanceAsync(DashboardFilterRequest filter);
         Task<List<DcHierarchyRawModel>?> GetDcHierarchyAsync(string domainFilter = "All", string siteFilter = "All", bool refreshView = false);
         Task<DefaultDcModel?> GetDefaultDcAsync(string targetDomain = "", bool refreshView = false);
     }

@@ -1,6 +1,7 @@
 using DnsClient;
 using ForestIQ.Domain;
 using ForestIQ.Domain.DTO;
+using ForestIQ.Domain.Enums;
 using ForestIQ.Domain.Interface;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
@@ -33,6 +34,7 @@ namespace ForestIQ.Service
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IKerberosService _kerberosService;
         private readonly IConfigureService _configureService;
+        private readonly IRefreshHistoryService _refreshHistoryService;
 
         public PowerShellService(
             ILogger<PowerShellService> logger,
@@ -41,7 +43,7 @@ namespace ForestIQ.Service
             IEncryptionService encryptionService,
             IHttpContextAccessor httpContextAccessor,
             IKerberosService kerberosService,
-            IConfigureService configureService)
+            IConfigureService configureService, IRefreshHistoryService refreshHistoryService)
         {
             _logger = logger;
             _cache = cache;
@@ -50,6 +52,7 @@ namespace ForestIQ.Service
             _httpContextAccessor = httpContextAccessor;
             _kerberosService = kerberosService;
             _configureService = configureService;
+            _refreshHistoryService = refreshHistoryService;
         }
 
         public async Task<PowerShellExecutionResult> ConnectAsync(PowerShellRequest request)
@@ -336,6 +339,8 @@ namespace ForestIQ.Service
                         return FilterAndMapGraphResponse(globalCachedResult.Data.Value, domain, site);
                     }
                 }
+
+                await _refreshHistoryService.AddRefreshHistoryAsync(SectionName.ForestOverview, null);
             }
 
             var powerShellConnectionRequest = CheckAndGetSession("", domain, site);

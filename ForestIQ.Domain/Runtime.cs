@@ -8,6 +8,14 @@ namespace ForestIQ.Domain
         public static EncryptionSettings Encryption { get; set; } = new();
         public static CacheSettings Cache { get; set; } = new();
         public static DebugSettings Debug { get; set; } = new();
+        public static BackgroundJobSettings BackgroundJobs { get; set; } = new();
+    }
+
+    public class BackgroundJobSettings
+    {
+        public string PerformancePollingCron { get; set; } = "0 * * * *";
+        public string RefreshHistoryCleanupCron { get; set; } = "0 0 * * *";
+        public int RefreshHistoryRetentionDays { get; set; } = 7;
     }
 
     public class JwtSettings

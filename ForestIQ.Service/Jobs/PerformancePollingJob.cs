@@ -108,7 +108,7 @@ namespace ForestIQ.Service.Jobs
                 var entry = new DcPerformanceHistoryEntry
                 {
                     ServerName = serverName,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = DateTime.Now,
                     CpuLoad = cpuLoad,
                     MemoryUsage = memoryUsage,
                     NetworkIo = networkIo

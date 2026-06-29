@@ -24,7 +24,7 @@ namespace ForestIQ.Infrastructure.Data
             await _dbContext.SaveChangesAsync();
 
             // 2. Delete entries older than 24 hours for this server to prevent database bloat
-            var cutoffTime = DateTime.UtcNow.AddHours(-24);
+            var cutoffTime = DateTime.Now.AddHours(-24);
             
             // ExecuteDeleteAsync is highly efficient for bulk deletes in EF Core 7+
             await _dbContext.PerformanceHistory
@@ -32,9 +32,9 @@ namespace ForestIQ.Infrastructure.Data
                 .ExecuteDeleteAsync();
         }
 
-        public async Task<DcPerformanceHistoryModel> GetHistoryAsync(string serverName)
+        public async Task<List<DcPerformanceHistoryModel>> GetHistoryAsync(string serverName)
         {
-            var cutoffTime = DateTime.UtcNow.AddHours(-24);
+            var cutoffTime = DateTime.Now.AddHours(-24);
 
             var entries = await _dbContext.PerformanceHistory
                 .AsNoTracking()
@@ -42,17 +42,16 @@ namespace ForestIQ.Infrastructure.Data
                 .OrderBy(h => h.Timestamp)
                 .ToListAsync();
 
-            var model = new DcPerformanceHistoryModel();
-            
-            foreach (var entry in entries)
+            var History = entries.Select(entry => new DcPerformanceHistoryModel
             {
-                model.Timestamps.Add(entry.Timestamp.ToString("HH:mm"));
-                model.CpuLoad.Add(entry.CpuLoad);
-                model.MemoryUsage.Add(entry.MemoryUsage);
-                model.NetworkIo.Add(entry.NetworkIo);
-            }
+                Timestamps = entry.Timestamp.ToString("HH:mm"),
+                CpuLoad = entry.CpuLoad,
+                MemoryUsage = entry.MemoryUsage,
+                NetworkIo = entry.NetworkIo
+            }).ToList();
+           
 
-            return model;
+            return History;
         }
     }
 }

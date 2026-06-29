@@ -67,10 +67,6 @@ namespace ForestIQ.Controllers
         [HttpPost("performance")]
         public async Task<IActionResult> GetPerformance([FromBody] DashboardFilterRequest request)
         {
-            if (string.IsNullOrEmpty(request.TargetDc))
-            {
-                return BadRequest(ApiResponse<object>.Fail("TargetDC is required for performance metrics."));
-            }
 
             var result = await _dashboardService.GetDcPerformanceAsync(request);
             if (result == null)

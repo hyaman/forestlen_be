@@ -13,7 +13,7 @@ namespace ForestIQ.Domain.Models.Dashboard
         public DcPerformanceLiveModel? LiveStats { get; set; }
 
         [JsonPropertyName("History")]
-        public DcPerformanceHistoryModel? History { get; set; }
+        public List<DcPerformanceHistoryModel>? History { get; set; }
     }
 
     public class DcPerformanceLiveModel
@@ -67,15 +67,15 @@ namespace ForestIQ.Domain.Models.Dashboard
     public class DcPerformanceHistoryModel
     {
         [JsonPropertyName("Timestamps")]
-        public List<string> Timestamps { get; set; } = new List<string>();
+        public string Timestamps { get; set; } = string.Empty;
 
         [JsonPropertyName("CpuLoad")]
-        public List<double> CpuLoad { get; set; } = new List<double>();
+        public double CpuLoad { get; set; }
 
         [JsonPropertyName("MemoryUsage")]
-        public List<double> MemoryUsage { get; set; } = new List<double>();
+        public double MemoryUsage { get; set; }
 
         [JsonPropertyName("NetworkIo")]
-        public List<double> NetworkIo { get; set; } = new List<double>();
+        public double NetworkIo { get; set; }
     }
 }

@@ -9,6 +9,8 @@ using ForestIQ.Domain;
 
 namespace ForestIQ.Controllers
 {
+    [ApiController]
+    [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
         private readonly IAdConnectionCache _cache;

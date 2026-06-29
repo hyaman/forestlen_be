@@ -7,6 +7,6 @@ namespace ForestIQ.Domain.Interface
     public interface IPerformanceHistoryRepository
     {
         Task SaveEntryAsync(DcPerformanceHistoryEntry entry);
-        Task<DcPerformanceHistoryModel> GetHistoryAsync(string serverName);
+        Task<List<DcPerformanceHistoryModel>> GetHistoryAsync(string serverName);
     }
 }
