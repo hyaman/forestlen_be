@@ -1,3 +1,5 @@
+using ForestIQ.Domain.Models.Licensing;
+
 namespace ForestIQ.Domain.DTO
 {
     public class AdConfiguration
@@ -17,5 +19,7 @@ namespace ForestIQ.Domain.DTO
         public DateTime? CreatedAtUtc { get; set; }
 
         public DateTime? UpdatedAtUtc { get; set; } = DateTime.Now;
+
+        public LicensingConfiguration? Licensing { get; set; }
     }
 }

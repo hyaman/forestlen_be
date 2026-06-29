@@ -29,9 +29,16 @@ namespace ForestIQ.Infrastructure.Data
                 entity.Property(e => e.UserName).IsRequired();
                 entity.Property(e => e.RemoteHost);
                 entity.Property(e => e.EncryptedPassword).IsRequired();
+                entity.Property(e => e.RemoteHost).HasMaxLength(200);
                 entity.Property(e => e.DnsServersJson).IsRequired();
-                entity.Property(e => e.CreatedAtUtc).IsRequired();
-                entity.Property(e => e.UpdatedAtUtc).IsRequired();
+                entity.Property(e => e.CreatedAtUtc).IsRequired(false);
+                entity.Property(e => e.UpdatedAtUtc).IsRequired(false);
+                
+                entity.Property(e => e.Licensing)
+                      .HasConversion(
+                          v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                          v => System.Text.Json.JsonSerializer.Deserialize<ForestIQ.Domain.Models.Licensing.LicensingConfiguration>(v, (System.Text.Json.JsonSerializerOptions?)null)
+                      );
             });
             modelBuilder.Entity<User>(entity =>
             {

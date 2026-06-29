@@ -30,6 +30,10 @@ namespace ForestIQ.Extensions
             var bgJobs = new BackgroundJobSettings();
             configuration.GetSection("BackgroundJobs").Bind(bgJobs);
             Runtime.BackgroundJobs = bgJobs;
+
+            var licensing = new LicensingSettings();
+            configuration.GetSection("Licensing").Bind(licensing);
+            Runtime.Licensing = licensing;
         }
     }
 }

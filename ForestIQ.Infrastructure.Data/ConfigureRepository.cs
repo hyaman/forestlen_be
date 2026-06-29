@@ -25,7 +25,7 @@ namespace ForestIQ.Infrastructure.Data
                 existing.DnsServersJson = configuration.DnsServersJson;
                 existing.RemoteHost = configuration.RemoteHost;
                 existing.UpdatedAtUtc = DateTime.Now;
-
+                existing.Licensing = configuration.Licensing;
                 _dbContext.Entry(existing).State = EntityState.Modified;
             }
             else

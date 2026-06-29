@@ -14,13 +14,15 @@ namespace ForestIQ.Service
         private readonly IKerberosService _kerberosService;
         private readonly IEncryptionService _encryptionService;
         private readonly ILogger<ConfigureService> _logger;
+        private readonly ForestIQ.Domain.Interface.Licensing.ILicenseValidator _licenseValidator;
 
-        public ConfigureService(IConfigureRepository repository,IKerberosService kerberosService,IEncryptionService encryptionService,ILogger<ConfigureService> logger)
+        public ConfigureService(IConfigureRepository repository,IKerberosService kerberosService,IEncryptionService encryptionService,ILogger<ConfigureService> logger, ForestIQ.Domain.Interface.Licensing.ILicenseValidator licenseValidator)
         {
             _repository = repository;
             _kerberosService = kerberosService;
             _encryptionService = encryptionService;
             _logger = logger;
+            _licenseValidator = licenseValidator;
         }
 
         public async Task<ConfigureResponse> ConfigureAsync(ConfigureRequest request)
@@ -34,6 +36,47 @@ namespace ForestIQ.Service
                     Success = false,
                     Message = validationError
                 };
+            }
+
+            var existingConfig = await _repository.GetByForestNameAsync();
+            var licensing = existingConfig?.Licensing ?? new ForestIQ.Domain.Models.Licensing.LicensingConfiguration
+            {
+                ContainerSetupDate = DateTime.UtcNow
+            };
+
+            if (!string.IsNullOrWhiteSpace(request.LicenseKey))
+            {
+                if (!_licenseValidator.TryParseLicense(request.LicenseKey, out var payload) || payload == null)
+                {
+                    return new ConfigureResponse { Success = false, Message = "Invalid license key format or signature." };
+                }
+
+                if (!string.IsNullOrWhiteSpace(payload.ForestName))
+                {
+                    if (!request.ConfirmEnvironment)
+                    {
+                        return new ConfigureResponse
+                        {
+                            Success = false,
+                            Message = $"The license is bound to AD Forest '{payload.ForestName}'. Please confirm that your configured Forest Name matches this.",
+                            RequiresEnvironmentConfirmation = true,
+                            DetectedForest = request.ForestName
+                        };
+                    }
+
+                    if (!string.Equals(payload.ForestName, request.ForestName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new ConfigureResponse { Success = false, Message = $"License is bound to AD Forest '{payload.ForestName}' but you are configuring '{request.ForestName}'." };
+                    }
+                    
+                    licensing.EnvironmentBinding = new ForestIQ.Domain.Models.Licensing.EnvironmentBindingConfig
+                    {
+                        Confirmed = true,
+                        AdForest = request.ForestName
+                    };
+                }
+
+                licensing.LicenseKey = request.LicenseKey;
             }
 
             DnsSnapshot? dnsSnapshot = null;
@@ -59,13 +102,15 @@ namespace ForestIQ.Service
                 
                 var configuration = new AdConfiguration
                 {
+                    Id = existingConfig?.Id ?? 0,
                     ForestName = request.ForestName.Trim(),
                     UserName = request.UserName.Trim(),
                     EncryptedPassword = _encryptionService.Protect(request.Password),
                     DnsServersJson = JsonSerializer.Serialize(dnsServers),
                     RemoteHost = request.RemoteHost?.Trim(),
                     UpdatedAtUtc = DateTime.Now,
-                    CreatedAtUtc = DateTime.Now
+                    CreatedAtUtc = existingConfig?.CreatedAtUtc ?? DateTime.Now,
+                    Licensing = licensing
                 };
 
                 var id = await _repository.UpsertAsync(configuration);
@@ -126,7 +171,8 @@ namespace ForestIQ.Service
                         DnsServersJson = configuration.DnsServersJson,
                         RemoteHost = configuration.RemoteHost,
                         CreatedAtUtc = configuration.CreatedAtUtc,
-                        UpdatedAtUtc = configuration.UpdatedAtUtc
+                        UpdatedAtUtc = configuration.UpdatedAtUtc,
+                        Licensing = configuration.Licensing
                     }
                 };
             }

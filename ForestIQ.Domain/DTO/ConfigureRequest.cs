@@ -16,5 +16,9 @@ namespace ForestIQ.Domain.DTO
         public string? DnsServer { get; init; }
 
         public string? RemoteHost { get; init; }
+
+        public string? LicenseKey { get; init; }
+
+        public bool ConfirmEnvironment { get; init; }
     }
 }

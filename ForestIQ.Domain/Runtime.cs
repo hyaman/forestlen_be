@@ -9,6 +9,13 @@ namespace ForestIQ.Domain
         public static CacheSettings Cache { get; set; } = new();
         public static DebugSettings Debug { get; set; } = new();
         public static BackgroundJobSettings BackgroundJobs { get; set; } = new();
+        public static LicensingSettings Licensing { get; set; } = new();
+    }
+
+    public class LicensingSettings
+    {
+        public string RsaPrivateKey { get; set; } = string.Empty;
+        public string RsaPublicKey { get; set; } = string.Empty;
     }
 
     public class BackgroundJobSettings

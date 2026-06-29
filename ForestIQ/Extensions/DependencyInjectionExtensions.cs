@@ -26,6 +26,11 @@ namespace ForestIQ.Extensions
             services.AddScoped<IRefreshHistoryRepository, RefreshHistoryRepository>();
             services.AddScoped<IRefreshHistoryService, RefreshHistoryService>();
 
+            services.AddScoped<ForestIQ.Domain.Interface.Licensing.IRsaHelper, ForestIQ.Service.Licensing.RsaHelper>();
+            services.AddScoped<ForestIQ.Domain.Interface.Licensing.ILicenseGenerator, ForestIQ.Service.Licensing.LicenseGenerator>();
+            services.AddScoped<ForestIQ.Domain.Interface.Licensing.ILicenseValidator, ForestIQ.Service.Licensing.LicenseValidator>();
+            services.AddScoped<ForestIQ.Domain.Interface.Licensing.ILicenseService, ForestIQ.Service.Licensing.LicenseService>();
+
             return services;
         }
     }

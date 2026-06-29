@@ -165,6 +165,7 @@ namespace ForestIQ
             app.UseMiddleware<ExceptionMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();
+            app.UseMiddleware<LicenseValidationMiddleware>();
 
             app.UseHangfireDashboard("/api/hangfire", new DashboardOptions
             {

@@ -7,5 +7,9 @@ namespace ForestIQ.Domain.DTO
         public string Message { get; set; } = string.Empty;
 
         public long? ConfigurationId { get; set; }
+
+        public bool RequiresEnvironmentConfirmation { get; set; }
+
+        public string? DetectedForest { get; set; }
     }
 }
