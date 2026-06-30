@@ -5,9 +5,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using ForestIQ.Domain;
 
 namespace ForestIQ.Controllers
 {
+    [ApiController]
+    [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
         private readonly IAdConnectionCache _cache;
@@ -16,9 +19,8 @@ namespace ForestIQ.Controllers
         private readonly IConfigureService _configureService;
         private readonly IUserService _userService;
         private readonly IEncryptionService _encryptionService;
-        private readonly IConfiguration _configuration;
 
-        public AuthController(IAdConnectionCache cache, IJwtService jwtService, IPowerShellService powerShellService, IConfigureService configureService, IUserService userService, IEncryptionService encryptionService, IConfiguration configuration)
+        public AuthController(IAdConnectionCache cache, IJwtService jwtService, IPowerShellService powerShellService, IConfigureService configureService, IUserService userService, IEncryptionService encryptionService)
         {
             _cache = cache;
             _jwtService = jwtService;
@@ -26,7 +28,6 @@ namespace ForestIQ.Controllers
             _configureService = configureService;
             _userService = userService;
             _encryptionService = encryptionService;
-            _configuration = configuration;
         }
 
         [HttpPost("login")]
@@ -93,7 +94,7 @@ namespace ForestIQ.Controllers
             };
 
             PowerShellExecutionResult? res = null;
-            var isDebug = _configuration.GetValue<bool>("Debug:Enabled", true);
+            var isDebug = Runtime.Debug.Enabled;
 
             res = await _powerShellService.ConnectAsync(request);
 

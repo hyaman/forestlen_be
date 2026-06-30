@@ -49,19 +49,6 @@ namespace ForestIQ.Controllers
             return Ok(result);
         }
 
-        [HttpPost("Get-AD-Health-Report")]
-        public async Task<IActionResult> GetAdDiagnostics([FromQuery] bool refreshView = false, [FromQuery] string? domain = null, [FromQuery] string? site = null)
-        {
-            var graphResponse = await _powerShellService.GetAdDiagnosticsAsync(refreshView, domain, site);
-
-            if (graphResponse == null)
-            {
-                return StatusCode(502, new { success = false, message = "Failed to retrieve AD diagnostics. The script returned no data." });
-            }
-
-            return Ok(graphResponse);
-        }
-
         [HttpPost("Get-AD-Topology")]
         public async Task<IActionResult> GetAdTopology([FromQuery] bool refreshView = false, [FromQuery] string? domain = null, [FromQuery] string? site = null)
         {

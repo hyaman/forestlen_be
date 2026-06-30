@@ -3,47 +3,123 @@ $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Fo
 $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
 
 if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
-    $DCs = Get-ADDomainController -Credential $cred -Filter * | Select-Object -ExpandProperty HostName
-} else {
+    $DCs = @()
+    try {
+        $Forest = Get-ADForest -Credential $cred
+        if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
+            $Domains = @()
+        }
+        else {
+            $Domains = if ($DomainFilter -ne 'All' -and -not [string]::IsNullOrEmpty($DomainFilter)) {
+                @($DomainFilter)
+            }
+            else {
+                $Forest.Domains
+            }
+        }
+        foreach ($DomainName in $Domains) {
+            $DomainDCs = Get-ADDomainController -Server $DomainName -Credential $cred -Filter *
+            if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
+                $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
+            }
+            if ($DomainDCs) {
+                $DCs += $DomainDCs | Select-Object -ExpandProperty HostName
+            }
+        }
+    }
+    catch {
+        $DomainDCs = Get-ADDomainController -Credential $cred -Filter *
+        if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
+            $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
+        }
+        $DCs = $DomainDCs | Select-Object -ExpandProperty HostName
+    }
+}
+else {
     $DCs = @($TargetDC)
 }
 
 $results = @()
 
 foreach ($DCName in $DCs) {
-    $RemoteData = Invoke-Command -ComputerName $DCName -Credential $cred -ArgumentList $TargetDomain, $DCName -ScriptBlock {
-        param($TargetDomain, $TargetDC)
-        $Computer = $env:COMPUTERNAME
+    try {
+        $RemoteData = Invoke-Command -ComputerName $DCName -Credential $cred -ArgumentList $TargetDomain, $DCName -ErrorAction Stop -ScriptBlock {
+            param($TargetDomain, $TargetDC)
+            $Computer = $env:COMPUTERNAME
 
-        $LiveSessions = @()
-        try {
-            $QUserRaw = quser 2>$null
-            if ($QUserRaw) {
-                $LiveSessions = @(
-                    $QUserRaw | Select-Object -Skip 1 | ForEach-Object {
-                        $Line = ($_ -replace "^\s+", "") -replace "\s{2,}", ","
-                        $Parts = $Line.Split(",")
-                        [PSCustomObject]@{
-                            ServerName  = $Computer
-                            UserName    = if ($Parts.Count -ge 1) { $Parts[0] } else { "Unknown" }
-                            SessionName = if ($Parts.Count -ge 2) { $Parts[1] } else { "Unknown" }
-                            ID          = if ($Parts.Count -ge 3) { $Parts[2] } else { "Unknown" }
-                            State       = if ($Parts.Count -ge 4) { $Parts[3] } else { "Unknown" }
-                            IdleTime    = if ($Parts.Count -ge 5) { $Parts[4] } else { "Unknown" }
-                            LogonTime   = if ($Parts.Count -ge 6) { ($Parts[5..($Parts.Count - 1)] -join " ") } else { "Unknown" }
-                            IsRemote    = if (($Parts -join " ") -match "rdp|ica") { $true } else { $false }
-                        }
-                    }
-                )
+            function Convert-IdleTime {
+                param([string]$IdleTime)
+
+                switch -Regex ($IdleTime) {
+                    '^none$' { return 'Active' }
+                    '^(\d+)\+(\d+):(\d+)$' { return "$($Matches[1]) days $($Matches[2]) hours $($Matches[3]) minutes" }
+                    '^(\d+):(\d+)$' { return "$($Matches[1]) hours $($Matches[2]) minutes" }
+                    '^\d+$' { return "$IdleTime minutes" }
+                    default { return $IdleTime }
+                }
             }
-        } catch { }
 
-        [PSCustomObject]@{
-            ServerName   = $Computer
-            FQDN         = $TargetDC
-            LiveSessions = $LiveSessions
+            $LiveSessions = @()
+            try {
+                $QUserRaw = quser 2>$null
+
+                if ($QUserRaw) {
+                    $RawOutput = $QUserRaw -join "`n"
+                    $LiveSessions = @(
+                        $QUserRaw | Select-Object -Skip 1 | ForEach-Object {
+                            $Line = $_.TrimStart()
+
+                            # SESSIONNAME present
+                            if ($Line -match '^(\S+)\s+(\S+)\s+(\d+)\s+(Active|Disc)\s+(\S+)\s+(.+)$') {
+                                [PSCustomObject]@{
+                                    ServerName  = $Computer
+                                    UserName    = $Matches[1]
+                                    SessionName = $Matches[2]
+                                    ID          = $Matches[3]
+                                    State       = $Matches[4]
+                                    IdleTime    = Convert-IdleTime $Matches[5]
+                                    LogonTime   = $Matches[6]
+                                    IsRemote    = $Matches[2] -match 'rdp|ica'
+                                }
+                            }
+                            # SESSIONNAME missing (common for disconnected sessions)
+                            elseif ($Line -match '^(\S+)\s+(\d+)\s+(Active|Disc)\s+(\S+)\s+(.+)$') {
+                                [PSCustomObject]@{
+                                    ServerName  = $Computer
+                                    UserName    = $Matches[1]
+                                    SessionName = ''
+                                    ID          = $Matches[2]
+                                    State       = $Matches[3]
+                                    IdleTime    = Convert-IdleTime $Matches[4]
+                                    LogonTime   = $Matches[5]
+                                    IsRemote    = $false
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+            catch { 
+                $ErrorMsg = $_.Exception.Message
+            }
+
+            [PSCustomObject]@{
+                ServerName   = $Computer
+                FQDN         = $TargetDC
+                LiveSessions = $LiveSessions
+                Error        = $ErrorMsg
+                RawOutput    = $RawOutput
+            }
         }
-    } -ErrorAction SilentlyContinue
+    } catch {
+        $RemoteData = [PSCustomObject]@{
+            ServerName   = $DCName
+            FQDN         = $DCName
+            LiveSessions = @()
+            Error        = "Failed to connect to DC via WinRM: $($_.Exception.Message)"
+            RawOutput    = $null
+        }
+    }
 
     if ($RemoteData) {
         $results += $RemoteData

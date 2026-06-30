@@ -9,6 +9,9 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Hangfire;
+using Hangfire.SQLite;
+using ForestIQ.Service.Jobs;
 
 namespace ForestIQ
 {
@@ -18,10 +21,8 @@ namespace ForestIQ
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
-
             builder.Services.AddControllers();
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+            
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
 
@@ -45,17 +46,27 @@ namespace ForestIQ
             var connectionString = builder.Configuration.GetConnectionString("ForestIqSqlite") ?? "Data Source=forestiq.db";
             builder.Services.AddDbContext<ForestIqDbContext>(options => options.UseSqlite(connectionString));
 
-            builder.Services.AddSingleton<IKerberosService, KerberosService>();
-            builder.Services.AddSingleton<IAdConnectionCache, AdConnectionCache>();
-            builder.Services.AddSingleton<IJwtService, JwtService>();
-            builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
-            builder.Services.AddScoped<IConfigureRepository, ConfigureRepository>();
-            builder.Services.AddScoped<IConfigureService, ConfigureService>();
-            builder.Services.AddScoped<IPowerShellService, PowerShellService>();
-            builder.Services.AddScoped<IDashboardService, DashboardService>();
-            builder.Services.AddScoped<IUserRepository, UserRepository>();
-            builder.Services.AddScoped<IUserService, UserService>();
+            // Register application services
+            builder.Services.RegisterApplicationServices();
 
+            #region Hangfire
+
+            var rawHangfireConn = builder.Configuration.GetConnectionString("HangfireSqlite") ?? "Data Source=hangfire.db;";
+
+            builder.Services.AddHangfire(configuration => configuration
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings()
+                .UseSQLiteStorage(rawHangfireConn, new SQLiteStorageOptions()));
+
+            builder.Services.AddHangfireServer(options =>
+            {
+                options.WorkerCount = 1;
+            });
+
+            #endregion
+
+            #region Jwt Authentication
             var key = Encoding.UTF8.GetBytes(Runtime.Jwt.Key);
 
             builder.Services
@@ -80,7 +91,9 @@ namespace ForestIQ
                                 new SymmetricSecurityKey(key)
                         };
                 });
+            #endregion
 
+            #region Swagger Configuration
             builder.Services.AddSwaggerGen(options =>
             {
                 options.AddSecurityDefinition("Bearer",
@@ -96,25 +109,27 @@ namespace ForestIQ
                 options.AddSecurityRequirement(
                     new OpenApiSecurityRequirement
                     {
-            {
-                new OpenApiSecurityScheme
-                {
-                    Reference = new OpenApiReference
-                    {
-                        Type = ReferenceType.SecurityScheme,
-                        Id = "Bearer"
+                        {
+                            new OpenApiSecurityScheme
+                            {
+                                Reference = new OpenApiReference
+                                {
+                                    Type = ReferenceType.SecurityScheme,
+                                    Id = "Bearer"
+                                }
+                            },
+                             Array.Empty<string>()
                     }
-                },
-                Array.Empty<string>()
-            }
                     });
             });
 
             builder.Services.AddAuthorization();
 
-            //builder.WebHost.UseUrls(["http://0.0.0.0:80"]);
+            #endregion
 
             var app = builder.Build();
+
+            #region Migrate Database and Seed Super Admin
 
             using (var scope = app.Services.CreateScope())
             {
@@ -135,6 +150,8 @@ namespace ForestIQ
                 }
             }
 
+            #endregion
+            
             app.UseSwagger();
             app.UseSwaggerUI();
 
@@ -142,11 +159,22 @@ namespace ForestIQ
 
             app.UseHttpsRedirection();
 
+            app.UseDefaultFiles();
+            app.UseStaticFiles();
+
             app.UseMiddleware<ExceptionMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();
 
+            app.UseHangfireDashboard("/api/hangfire", new DashboardOptions
+            {
+                Authorization = new[] { new HangfireAuthorizationFilter() }
+            });
+            
+            app.ScheduleRecurringJobs();
+
             app.MapControllers();
+            app.MapFallbackToFile("index.html");
 
             app.Run();
         }

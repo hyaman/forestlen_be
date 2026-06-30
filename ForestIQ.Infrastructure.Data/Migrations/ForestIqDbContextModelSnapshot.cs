@@ -58,6 +58,64 @@ namespace ForestIQ.Infrastructure.Data.Migrations
                     b.ToTable("AdConfigurations");
                 });
 
+            modelBuilder.Entity("ForestIQ.Domain.DTO.DcPerformanceHistoryEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("CpuLoad")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryUsage")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("NetworkIo")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerName", "Timestamp");
+
+                    b.ToTable("PerformanceHistory");
+                });
+
+            modelBuilder.Entity("ForestIQ.Domain.DTO.RefreshHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RefreshTime")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SectionName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TriggeredBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RefreshTime")
+                        .IsDescending();
+
+                    b.HasIndex("SectionName");
+
+                    b.ToTable("RefreshHistories");
+                });
+
             modelBuilder.Entity("ForestIQ.Domain.DTO.User", b =>
                 {
                     b.Property<long>("Id")

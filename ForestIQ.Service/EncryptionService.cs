@@ -53,26 +53,34 @@ namespace ForestIQ.Service
         {
             if (string.IsNullOrEmpty(cipherText)) return cipherText;
 
-            var fullCipher = Convert.FromBase64String(cipherText);
-
-            using (var aes = Aes.Create())
+            try
             {
-                var iv = new byte[aes.BlockSize / 8];
-                var cipher = new byte[fullCipher.Length - iv.Length];
+                var fullCipher = Convert.FromBase64String(cipherText);
 
-                Buffer.BlockCopy(fullCipher, 0, iv, 0, iv.Length);
-                Buffer.BlockCopy(fullCipher, iv.Length, cipher, 0, cipher.Length);
-
-                aes.Key = _key;
-                aes.IV = iv;
-
-                using (var decryptor = aes.CreateDecryptor(aes.Key, aes.IV))
-                using (var ms = new MemoryStream(cipher))
-                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
-                using (var sr = new StreamReader(cs))
+                using (var aes = Aes.Create())
                 {
-                    return sr.ReadToEnd();
+                    var iv = new byte[aes.BlockSize / 8];
+                    var cipher = new byte[fullCipher.Length - iv.Length];
+
+                    Buffer.BlockCopy(fullCipher, 0, iv, 0, iv.Length);
+                    Buffer.BlockCopy(fullCipher, iv.Length, cipher, 0, cipher.Length);
+
+                    aes.Key = _key;
+                    aes.IV = iv;
+
+                    using (var decryptor = aes.CreateDecryptor(aes.Key, aes.IV))
+                    using (var ms = new MemoryStream(cipher))
+                    using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
+                    using (var sr = new StreamReader(cs))
+                    {
+                        return sr.ReadToEnd();
+                    }
                 }
+            }
+            catch (Exception ex) when (ex is CryptographicException || ex is FormatException)
+            {
+                // If the key changed or the data is not valid base64/encrypted, return null
+                return null;
             }
         }
     }
