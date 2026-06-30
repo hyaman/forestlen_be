@@ -40,15 +40,18 @@ namespace ForestIQ.Controllers
             return Ok(ApiResponse<string>.Ok("Refresh history added successfully."));
         }
 
+        [AllowAnonymous]
         [HttpGet("get-refresh-history/{section}")]
-        public async Task<IActionResult> GetRefreshHistory(SectionName section)
+        public async Task<IActionResult> GetRefreshHistory(string section)
         {
-            if (!Enum.IsDefined(typeof(SectionName), section))
+            if(string.IsNullOrEmpty(section))
             {
-                return BadRequest(ApiResponse<object>.Fail("Invalid section."));
+                return Ok(ApiResponse<List<RefreshHistory>>.Ok(new List<RefreshHistory>()));
             }
 
-            var history = await _refreshHistoryService.GetHistoryAsync(section);
+            var sec = (SectionName)Enum.Parse(typeof(SectionName), section);
+
+            var history = await _refreshHistoryService.GetHistoryAsync(sec);
             return Ok(ApiResponse<List<RefreshHistory>>.Ok(history));
         }
 
@@ -64,6 +67,7 @@ namespace ForestIQ.Controllers
             return Ok(ApiResponse<RefreshHistory>.Ok(latest));
         }
 
+        [AllowAnonymous]
         [HttpGet("get-available-sections")]
         public IActionResult GetAvailableSections()
         {
