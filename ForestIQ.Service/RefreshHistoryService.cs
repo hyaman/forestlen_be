@@ -16,14 +16,15 @@ namespace ForestIQ.Service
             _repository = repository;
         }
 
-        public async Task AddRefreshHistoryAsync(SectionName sectionName, string? triggeredBy)
+        public async Task AddRefreshHistoryAsync(SectionName sectionName, string? triggeredBy, string? jsonData = null)
         {
             var history = new RefreshHistory
             {
                 SectionName = sectionName,
                 RefreshTime = DateTime.Now,
                 TriggeredBy = triggeredBy,
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.Now,
+                JsonData = jsonData
             };
 
             await _repository.AddAsync(history);
@@ -34,9 +35,9 @@ namespace ForestIQ.Service
             return await _repository.GetHistoryAsync(sectionName);
         }
 
-        public async Task<RefreshHistory?> GetLatestAsync(SectionName sectionName)
+        public async Task<RefreshHistory?> GetLatestAsync(int id)
         {
-            return await _repository.GetLatestAsync(sectionName);
+            return await _repository.GetLatestAsync(id);
         }
     }
 }

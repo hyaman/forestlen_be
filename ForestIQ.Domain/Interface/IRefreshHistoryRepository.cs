@@ -10,7 +10,7 @@ namespace ForestIQ.Domain.Interface
     {
         Task AddAsync(RefreshHistory refreshHistory);
         Task<List<RefreshHistory>> GetHistoryAsync(SectionName sectionName);
-        Task<RefreshHistory?> GetLatestAsync(SectionName sectionName);
+        Task<RefreshHistory?> GetLatestAsync(int id);
         Task DeleteOlderThanAsync(DateTime thresholdDate);
     }
 }

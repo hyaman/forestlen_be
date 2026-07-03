@@ -25,6 +25,9 @@ namespace ForestIQ.Extensions
             services.AddScoped<IPerformanceHistoryRepository, PerformanceHistoryRepository>();
             services.AddScoped<IRefreshHistoryRepository, RefreshHistoryRepository>();
             services.AddScoped<IRefreshHistoryService, RefreshHistoryService>();
+            services.AddScoped<IJobConfigurationRepository, JobConfigurationRepository>();
+            services.AddScoped<IJobConfigurationService, JobConfigurationService>();
+            services.AddSingleton<IJobSchedulerService, JobSchedulerService>();
 
             return services;
         }

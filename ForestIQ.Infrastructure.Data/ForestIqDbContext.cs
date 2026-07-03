@@ -15,6 +15,7 @@ namespace ForestIQ.Infrastructure.Data
         public DbSet<User> Users { get; set; }
         public DbSet<DcPerformanceHistoryEntry> PerformanceHistory { get; set; }
         public DbSet<RefreshHistory> RefreshHistories { get; set; }
+        public DbSet<JobConfiguration> JobConfigurations { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -65,6 +66,17 @@ namespace ForestIQ.Infrastructure.Data
                       )
                       .IsRequired();
                 entity.Property(e => e.RefreshTime).IsRequired();
+            });
+
+            modelBuilder.Entity<JobConfiguration>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.JobName).IsUnique();
+
+                entity.Property(e => e.JobName).IsRequired();
+                entity.Property(e => e.CronExpression).IsRequired();
+                entity.Property(e => e.CreatedDate).IsRequired();
+                entity.Property(e => e.LastModified).IsRequired();
             });
         }
     }

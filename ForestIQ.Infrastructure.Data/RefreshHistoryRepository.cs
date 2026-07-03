@@ -29,15 +29,20 @@ namespace ForestIQ.Infrastructure.Data
             return await _context.RefreshHistories
                 .Where(r => r.SectionName == sectionName)
                 .OrderByDescending(r => r.RefreshTime)
-                .Take(10)
+                .Select(r => new RefreshHistory
+                {
+                    Id = r.Id,
+                    SectionName = r.SectionName,
+                    RefreshTime = r.RefreshTime,
+                    CreatedAt = r.CreatedAt
+                })
                 .ToListAsync();
         }
 
-        public async Task<RefreshHistory?> GetLatestAsync(SectionName sectionName)
+        public async Task<RefreshHistory?> GetLatestAsync(int id)
         {
             return await _context.RefreshHistories
-                .Where(r => r.SectionName == sectionName)
-                .OrderByDescending(r => r.RefreshTime)
+                .Where(r => r.Id == id)
                 .FirstOrDefaultAsync();
         }
 

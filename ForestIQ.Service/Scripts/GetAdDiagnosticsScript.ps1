@@ -16,7 +16,7 @@ $dcs = @()
 try { 
     $forest = Get-ADForest -Credential $cred
     foreach ($domain in $forest.Domains) {
-        if ($global:FilterDomain -and ($domain -notmatch $global:FilterDomain)) { continue }
+        if ($global:FilterDomain -and ($domain -ne $global:FilterDomain)) { continue }
         try {
             $domainDCs = @(Get-ADDomainController -Filter * -Server $domain -Credential $cred -ErrorAction Stop | Select-Object HostName, Site)
             if ($global:FilterSite) { $domainDCs = @($domainDCs | Where-Object { $_.Site -match $global:FilterSite }) }

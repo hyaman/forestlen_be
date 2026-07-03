@@ -100,13 +100,13 @@ namespace ForestIQ.Controllers
 
             if (res == null || !res.Success)
             {
-                return BadRequest(new
+                return Ok(new
                 {
-                    Success = false,
+                    Success = true,
                     Token = "",
-                    RequireConfiguration = false,
-                    Message = res?.Message ?? "Failed to connect to any domain controller. Please check the configured AD credentials and try again.",
-                    Error = res?.Error,
+                    RequireConfiguration = true,
+                    Message = isSuperAdmin ? "Super Admin logged in. Active Directory configuration is required." : "Configuration Not Found. Please Log in with correct credentials",
+                    Error = null as string,
                     ConnectedHost = null as string
                 });
             }
@@ -148,22 +148,16 @@ namespace ForestIQ.Controllers
 
             if (discovery.Hosts != null && discovery.Hosts.Count > 0 && discovery.DomainControllers != null && discovery.DomainControllers.Count > 0)
             {
-                return Ok(new
-                {
-                    Success = true,
-                    StatusCode = 200,
-                    Data = discovery.DomainControllers,
-                    Error = discovery.DomainControllerDiscoveryError
-                });
+                return Ok(ApiResponse<List<DomainControllerDiscoveryResult>>.Ok(
+                    discovery.DomainControllers,
+                    discovery.DomainControllerDiscoveryError ?? "Discovery successful."
+                ));
             }
 
-            return NotFound(new
-            {
-                Success = false,
-                StatusCode = 404,
-                Data = discovery.DomainControllers,
-                Error = discovery.DomainControllerDiscoveryError
-            });
+            return NotFound(ApiResponse<List<DomainControllerDiscoveryResult>>.Fail(
+                discovery.DomainControllerDiscoveryError ?? "No domain controllers were discovered.",
+                404
+            ));
         }
 
         [Authorize]

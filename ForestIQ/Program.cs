@@ -148,6 +148,14 @@ namespace ForestIQ
                         Role = "SuperAdmin"
                     });
                 }
+                
+                // Initialize Jobs
+                var jobConfigService = scope.ServiceProvider.GetRequiredService<IJobConfigurationService>();
+                await jobConfigService.InitializeJobsAsync();
+
+                // Sync Jobs
+                var jobSchedulerService = scope.ServiceProvider.GetRequiredService<IJobSchedulerService>();
+                jobSchedulerService.SyncAllJobs();
             }
 
             #endregion
@@ -171,8 +179,6 @@ namespace ForestIQ
                 Authorization = new[] { new HangfireAuthorizationFilter() }
             });
             
-            app.ScheduleRecurringJobs();
-
             app.MapControllers();
             app.MapFallbackToFile("index.html");
 

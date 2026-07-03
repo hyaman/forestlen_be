@@ -7,8 +7,8 @@ namespace ForestIQ.Domain.Interface
 {
     public interface IRefreshHistoryService
     {
-        Task AddRefreshHistoryAsync(SectionName sectionName, string? triggeredBy);
+        Task AddRefreshHistoryAsync(SectionName sectionName, string? triggeredBy, string? jsonData = null);
         Task<List<RefreshHistory>> GetHistoryAsync(SectionName sectionName);
-        Task<RefreshHistory?> GetLatestAsync(SectionName sectionName);
+        Task<RefreshHistory?> GetLatestAsync(int id);
     }
 }

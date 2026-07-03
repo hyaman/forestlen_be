@@ -3,6 +3,7 @@ using System;
 using ForestIQ.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ForestIQ.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ForestIqDbContext))]
-    partial class ForestIqDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260701072305_AddJobConfigurations")]
+    partial class AddJobConfigurations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.2");
@@ -113,9 +116,6 @@ namespace ForestIQ.Infrastructure.Data.Migrations
 
                     b.Property<DateTime>("LastModified")
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("RetentionDays")
-                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 

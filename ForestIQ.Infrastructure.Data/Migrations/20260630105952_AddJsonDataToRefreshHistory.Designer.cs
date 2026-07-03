@@ -3,6 +3,7 @@ using System;
 using ForestIQ.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ForestIQ.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ForestIqDbContext))]
-    partial class ForestIqDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260630105952_AddJsonDataToRefreshHistory")]
+    partial class AddJsonDataToRefreshHistory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.2");
@@ -85,44 +88,6 @@ namespace ForestIQ.Infrastructure.Data.Migrations
                     b.HasIndex("ServerName", "Timestamp");
 
                     b.ToTable("PerformanceHistory");
-                });
-
-            modelBuilder.Entity("ForestIQ.Domain.DTO.JobConfiguration", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CronExpression")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("JobName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("LastModified")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("RetentionDays")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("JobName")
-                        .IsUnique();
-
-                    b.ToTable("JobConfigurations");
                 });
 
             modelBuilder.Entity("ForestIQ.Domain.DTO.RefreshHistory", b =>

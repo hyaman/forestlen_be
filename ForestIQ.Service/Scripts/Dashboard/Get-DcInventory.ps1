@@ -8,10 +8,12 @@ if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
         $Forest = Get-ADForest -Credential $cred
         if ($ForestFilter -ne 'All' -and -not [string]::IsNullOrEmpty($ForestFilter) -and $Forest.Name -ne $ForestFilter) {
             $Domains = @()
-        } else {
+        }
+        else {
             $Domains = if ($DomainFilter -ne 'All' -and -not [string]::IsNullOrEmpty($DomainFilter)) {
                 @($DomainFilter)
-            } else {
+            }
+            else {
                 $Forest.Domains
             }
         }
@@ -24,14 +26,16 @@ if ($TargetDC -eq 'All' -or [string]::IsNullOrEmpty($TargetDC)) {
                 $DCs += $DomainDCs | Select-Object -ExpandProperty HostName
             }
         }
-    } catch {
+    }
+    catch {
         $DomainDCs = Get-ADDomainController -Credential $cred -Filter *
         if ($SiteFilter -ne 'All' -and -not [string]::IsNullOrEmpty($SiteFilter)) {
             $DomainDCs = $DomainDCs | Where-Object Site -eq $SiteFilter
         }
         $DCs = $DomainDCs | Select-Object -ExpandProperty HostName
     }
-} else {
+}
+else {
     $DCs = @($TargetDC)
 }
 
@@ -76,7 +80,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
 
             if ($CPU -is [array]) {
                 $CpuLoad = ($CPU | Measure-Object LoadPercentage -Average).Average
-            } else {
+            }
+            else {
                 $CpuLoad = $CPU.LoadPercentage
             }
             
@@ -90,7 +95,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             elseif ($CS.Manufacturer -match "Google") { $Platform = "GCP" }
             elseif ($CS.Manufacturer -match "Microsoft Corporation" -and $CS.Model -match "Virtual Machine") { $Platform = "Azure" }
         }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'OS / Hardware Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -114,7 +120,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
                 }
             )
         }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Disk Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -133,7 +140,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
                 }
             }
         )
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Services Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -145,13 +153,14 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         $RolesToCheck = @("AD-Domain-Services", "DNS", "FS-DFS", "GPMC", "RSAT")
         $WindowsRoles = Get-WindowsFeature -Name $RolesToCheck -ErrorAction Stop | Where-Object Installed
         $Roles = @(foreach ($Role in $WindowsRoles) {
-            [PSCustomObject]@{
-                RoleName = $Role.Name
-                Display  = $Role.DisplayName
-                Status   = if ($Role.Name -match "AD-Domain-Services|DNS|RSAT|GPMC|FS-DFS") { "OK" } else { "INFO" }
-            }
-        })
-    } catch { }
+                [PSCustomObject]@{
+                    RoleName = $Role.Name
+                    Display  = $Role.DisplayName
+                    Status   = if ($Role.Name -match "AD-Domain-Services|DNS|RSAT|GPMC|FS-DFS") { "OK" } else { "INFO" }
+                }
+            })
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Roles Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -162,17 +171,18 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         try {
             $RegistryPaths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
             $Apps = @(foreach ($Path in $RegistryPaths) {
-                Get-ItemProperty $Path -ErrorAction SilentlyContinue | Where-Object DisplayName | ForEach-Object {
-                    [PSCustomObject]@{
-                        SoftwareName = $_.DisplayName
-                        Version      = $_.DisplayVersion
-                        Publisher    = $_.Publisher
-                        InstallDate  = $_.InstallDate
-                        Status       = if ($_.Publisher -match "Microsoft") { "OK" } else { "WARNING - Non-Microsoft Application" }
+                    Get-ItemProperty $Path -ErrorAction SilentlyContinue | Where-Object DisplayName | ForEach-Object {
+                        [PSCustomObject]@{
+                            SoftwareName = $_.DisplayName
+                            Version      = $_.DisplayVersion
+                            Publisher    = $_.Publisher
+                            InstallDate  = $_.InstallDate
+                            Status       = if ($_.Publisher -match "Microsoft") { "OK" } else { "WARNING - Non-Microsoft Application" }
+                        }
                     }
-                }
-            })
-        } catch { }
+                })
+        }
+        catch { }
     }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Applications Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
@@ -182,13 +192,14 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $Firewall = @()
     try {
         $Firewall = @(Get-NetFirewallProfile -ErrorAction Stop | ForEach-Object {
-            [PSCustomObject]@{
-                Profile = $_.Name
-                Enabled = $_.Enabled
-                Status  = if ($_.Enabled) { "OK" } else { "WARNING - Firewall Disabled" }
-            }
-        })
-    } catch { }
+                [PSCustomObject]@{
+                    Profile = $_.Name
+                    Enabled = $_.Enabled
+                    Status  = if ($_.Enabled) { "OK" } else { "WARNING - Firewall Disabled" }
+                }
+            })
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Firewall Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -200,7 +211,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         $NTDSDB = $NTDSParams."DSA Database file"
         $NTDSLogPath = $NTDSParams."Database log files path"
         if ($NTDSDB -and (Test-Path $NTDSDB)) { $NTDSSizeGB = [math]::Round((Get-Item $NTDSDB).Length / 1GB, 2) }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'NTDS Information Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -215,12 +227,12 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             $DaysSincePatch = [math]::Round(((Get-Date) - $LatestHotfix.InstalledOn).TotalDays, 0)
             
             $RecentHotfixes = @($AllHotfixes | Select-Object -First 10 | ForEach-Object {
-                [PSCustomObject]@{
-                    HotFixID    = $_.HotFixID
-                    InstalledOn = $_.InstalledOn
-                    Description = $_.Description
-                }
-            })
+                    [PSCustomObject]@{
+                        HotFixID    = $_.HotFixID
+                        InstalledOn = $_.InstalledOn
+                        Description = $_.Description
+                    }
+                })
         }
         
         $PendingReboot = ((Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") -or (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired") -or (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations"))
@@ -231,9 +243,11 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             $Searcher = $UpdateSession.CreateUpdateSearcher()
             $PendingUpdates = $Searcher.Search("IsInstalled=0 and Type='Software'").Updates
             $PendingUpdateCount = $PendingUpdates.Count
-        } catch { 
         }
-    } catch { }
+        catch { 
+        }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Patch Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
     $Timings.Add([pscustomobject]@{ Section = 'Recent Updates Collection'; ElapsedMilliseconds = 0 })
@@ -250,7 +264,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         $DefenderSigAge = $Defender.AntivirusSignatureAge
         $DefenderVersion = $Defender.AntivirusSignatureVersion
         $DefenderEngine = $Defender.AMEngineVersion
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Defender Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -259,7 +274,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $DCInfo = $null
     try {
         $DCInfo = Get-ADDomainController -Identity $Computer -Credential $PassedCred -ErrorAction Stop
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'DC Information Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -268,17 +284,18 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $NetworkAdapters = @()
     try {
         $NetworkAdapters = @(Get-NetAdapter -ErrorAction Stop | ForEach-Object {
-            $IPInfo = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
-            [PSCustomObject]@{
-                Name        = $_.Name
-                Description = $_.InterfaceDescription
-                Status      = $_.Status
-                MacAddress  = $_.MacAddress
-                LinkSpeed   = $_.LinkSpeed
-                IPv4        = $IPInfo.IPAddress
-            }
-        })
-    } catch { }
+                $IPInfo = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+                [PSCustomObject]@{
+                    Name        = $_.Name
+                    Description = $_.InterfaceDescription
+                    Status      = $_.Status
+                    MacAddress  = $_.MacAddress
+                    LinkSpeed   = $_.LinkSpeed
+                    IPv4        = $IPInfo.IPAddress
+                }
+            })
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Network Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -287,12 +304,13 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $DnsServers = @()
     try {
         $DnsServers = @(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction Stop | ForEach-Object {
-            [PSCustomObject]@{
-                InterfaceAlias = $_.InterfaceAlias
-                DnsServers     = ($_.ServerAddresses -join ", ")
-            }
-        })
-    } catch { }
+                [PSCustomObject]@{
+                    InterfaceAlias = $_.InterfaceAlias
+                    DnsServers     = ($_.ServerAddresses -join ", ")
+                }
+            })
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'DNS Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -301,7 +319,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $OwnedFSMORoles = @()
     try {
         if ($DCInfo) { $OwnedFSMORoles = $DCInfo.OperationMasterRoles }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'FSMO Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -310,15 +329,16 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     $Certificates = @()
     try {
         $Certificates = @(Get-ChildItem Cert:\LocalMachine\My -ErrorAction Stop | ForEach-Object {
-            [PSCustomObject]@{
-                Subject     = $_.Subject
-                Issuer      = $_.Issuer
-                Thumbprint  = $_.Thumbprint
-                NotAfter    = $_.NotAfter
-                DaysToExpiry = [math]::Round(($_.NotAfter - (Get-Date)).TotalDays,0)
-            }
-        })
-    } catch { }
+                [PSCustomObject]@{
+                    Subject      = $_.Subject
+                    Issuer       = $_.Issuer
+                    Thumbprint   = $_.Thumbprint
+                    NotAfter     = $_.NotAfter
+                    DaysToExpiry = [math]::Round(($_.NotAfter - (Get-Date)).TotalDays, 0)
+                }
+            })
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Certificate Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -333,7 +353,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             foreach ($drive in $localDrives) {
                 $foldersToMeasure += Get-ChildItem "$drive\" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
             }
-        } else {
+        }
+        else {
             $foldersToMeasure = Get-ChildItem "C:\" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
         }
 
@@ -342,7 +363,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             $size = 0
             try {
                 $size = $fso.GetFolder($folder).Size
-            } catch { }
+            }
+            catch { }
             if ($size -gt 0) {
                 $dirSizes += [PSCustomObject]@{
                     Path   = $folder
@@ -351,7 +373,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             }
         }
         $TopDirectories = @($dirSizes | Sort-Object SizeGB -Descending | Select-Object -First 5)
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Top Directories Collection'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -368,7 +391,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             $dfsr = Get-CimInstance -CimSession $cimSession -Namespace root\microsoftdfs -ClassName DfsrReplicatedFolderInfo -ErrorAction SilentlyContinue | Where-Object ReplicationGroupName -match "Domain System Volume"
             if ($dfsr) {
                 $SysvolStatus = switch ($dfsr.State) { 0 { "Uninitialized" }; 1 { "Initialized" }; 2 { "Initial Sync" }; 3 { "Auto Recovery" }; 4 { "Normal" }; 5 { "In Error" }; default { "Unknown" } }
-            } else {
+            }
+            else {
                 $frs = Get-Service ntfrs -ErrorAction SilentlyContinue
                 if ($frs -and $frs.Status -eq 'Running') { $SysvolStatus = "FRS Running" } else { $SysvolStatus = "Not Found" }
             }
@@ -377,19 +401,22 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         try {
             $ldapVal = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters" -Name "LDAPServerIntegrity" -ErrorAction Stop).LDAPServerIntegrity
             $LdapSigning = if ($ldapVal -eq 2) { "Required" } elseif ($ldapVal -eq 1) { "Negotiated" } else { "None" }
-        } catch { }
+        }
+        catch { }
 
         try {
             $smbVal = (Get-ItemProperty "HKLM:\System\CurrentControlSet\Services\LanManServer\Parameters" -Name "RequireSecuritySignature" -ErrorAction Stop).RequireSecuritySignature
             $SmbSigning = if ($smbVal -eq 1) { "Required" } else { "Disabled" }
-        } catch { }
+        }
+        catch { }
 
         $adwsSvc = $Services | Where-Object ServiceName -eq "ADWS"
         if ($adwsSvc) { $ADWSStatus = $adwsSvc.Status }
 
         $w32Svc = $Services | Where-Object ServiceName -eq "W32Time"
         if ($w32Svc) { $W32TimeHealth = $w32Svc.Status }
-    } catch { }
+    }
+    catch { }
 
     # Port Connectivity Tests
     $sw.Restart()
@@ -409,17 +436,18 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
         [void]$deadline.Wait(500)
         
         $PortConnectivity = @(foreach ($t in $tasks) {
-            $open = $t.Task.Status -eq [System.Threading.Tasks.TaskStatus]::RanToCompletion -and $t.Tcp.Connected
-            [PSCustomObject]@{
-                ServerName = $Computer
-                Service    = $t.Service
-                Port       = $t.Port
-                Open       = $open
-                Status     = if ($open) { "OK" } else { "WARNING - Closed / Blocked" }
-            }
-        })
+                $open = $t.Task.Status -eq [System.Threading.Tasks.TaskStatus]::RanToCompletion -and $t.Tcp.Connected
+                [PSCustomObject]@{
+                    ServerName = $Computer
+                    Service    = $t.Service
+                    Port       = $t.Port
+                    Open       = $open
+                    Status     = if ($open) { "OK" } else { "WARNING - Closed / Blocked" }
+                }
+            })
         foreach ($t in $tasks) { try { $t.Tcp.Close() } catch {} }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Port Connectivity Tests'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -435,7 +463,8 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
             (($Disks | Where-Object Status -eq "WARNING").Count -gt 0) -or
             (($Services | Where-Object Health -eq "WARNING").Count -gt 0)
         ) { "WARNING" } else { "OK" }
-    } catch { }
+    }
+    catch { }
     $sw.Stop()
     $Timings.Add([pscustomobject]@{ Section = 'Overall Status Calculation'; ElapsedMilliseconds = $sw.ElapsedMilliseconds })
 
@@ -500,16 +529,16 @@ $results = Invoke-Command -ComputerName $DCs -Credential $cred -ArgumentList $Ta
     }
 
     return [pscustomobject]@{
-        Inventory = $Inventory
-        Disks = $Disks
-        Services = $Services
-        Roles = $Roles
-        Apps = $Apps
-        Firewall = $Firewall
-        PortConnectivity = $PortConnectivity
-        HealthSummary = $HealthSummary
+        Inventory          = $Inventory
+        Disks              = $Disks
+        Services           = $Services
+        Roles              = $Roles
+        Apps               = $Apps
+        Firewall           = $Firewall
+        PortConnectivity   = $PortConnectivity
+        HealthSummary      = $HealthSummary
         PerformanceMetrics = $Timings
-        TopDirectories = $TopDirectories
+        TopDirectories     = $TopDirectories
     }
 }
 
@@ -518,11 +547,11 @@ if ($InvokeErrors) {
         if ($err.CategoryInfo.TargetName) {
             $TargetName = $err.CategoryInfo.TargetName
             $results += [PSCustomObject]@{
-                Inventory = [PSCustomObject]@{
+                Inventory     = [PSCustomObject]@{
                     ServerName = $TargetName
                     FQDN       = $TargetName
                 }
-                Error = "Failed to connect to DC via WinRM: $($err.Exception.Message)"
+                Error         = "Failed to connect to DC via WinRM: $($err.Exception.Message)"
                 HealthSummary = [PSCustomObject]@{
                     DiskHealth        = "ERROR"
                     ServiceHealth     = "ERROR"

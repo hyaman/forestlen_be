@@ -28,6 +28,10 @@ namespace ForestIQ.Controllers
             {
                 return StatusCode(500, ApiResponse<object>.Fail("Failed to retrieve inventory data."));
             }
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                return StatusCode(500, ApiResponse<object>.Fail(result.Error));
+            }
             return Ok(ApiResponse<object>.Ok(result));
         }
 

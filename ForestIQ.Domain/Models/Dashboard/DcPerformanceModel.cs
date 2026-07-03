@@ -18,6 +18,9 @@ namespace ForestIQ.Domain.Models.Dashboard
 
     public class DcPerformanceLiveModel
     {
+        [JsonPropertyName("ServerName")]
+        public string? ServerName { get; set; }
+
         [JsonPropertyName("CpuLoad")]
         public double? CpuLoad { get; set; }
 
@@ -26,6 +29,30 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("DiskCFree")]
         public double? DiskCFree { get; set; }
+
+        [JsonPropertyName("DiskCSizeGB")]
+        public double? DiskCSizeGB { get; set; }
+
+        [JsonPropertyName("DiskCFreeGB")]
+        public double? DiskCFreeGB { get; set; }
+
+        [JsonPropertyName("LocalDisks")]
+        public List<LocalDiskData>? LocalDisks { get; set; }
+
+        [JsonPropertyName("TotalProcesses")]
+        public int? TotalProcesses { get; set; }
+
+        [JsonPropertyName("VirtualMemorySizeKB")]
+        public long? VirtualMemorySizeKB { get; set; }
+
+        [JsonPropertyName("FreeVirtualMemoryKB")]
+        public long? FreeVirtualMemoryKB { get; set; }
+
+        [JsonPropertyName("CpuModel")]
+        public string? CpuModel { get; set; }
+
+        [JsonPropertyName("LogicalCores")]
+        public int? LogicalCores { get; set; }
 
         [JsonPropertyName("UptimeDays")]
         public double? UptimeDays { get; set; }
@@ -44,6 +71,18 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("TopProcesses")]
         public List<ProcessData>? TopProcesses { get; set; }
+    }
+
+    public class LocalDiskData
+    {
+        [JsonPropertyName("DriveLetter")]
+        public string? DriveLetter { get; set; }
+
+        [JsonPropertyName("SizeGB")]
+        public double? SizeGB { get; set; }
+
+        [JsonPropertyName("FreeGB")]
+        public double? FreeGB { get; set; }
     }
 
     public class ProcessData

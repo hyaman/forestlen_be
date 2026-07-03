@@ -35,39 +35,6 @@ namespace ForestIQ.Service
             _refreshHistoryService = refreshHistoryService;
         }
 
-        private async Task<JsonElement?> ExecuteDashboardScriptAsync(string scriptName, string variablesPrepended)
-        {
-            try
-            {
-                var scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "Dashboard", scriptName);
-                
-                if (!File.Exists(scriptPath))
-                {
-                    _logger.LogError($"Dashboard script not found at path: {scriptPath}");
-                    return null;
-                }
-
-                var scriptContent = await File.ReadAllTextAsync(scriptPath);
-                var finalScript = variablesPrepended + Environment.NewLine + scriptContent;
-
-                var request = new PowerShellScriptRequest { Script = finalScript };
-                var result = await _powerShellService.ExecuteScriptAsync(request);
-
-                if (result.Success && result.Data.HasValue)
-                {
-                    return result.Data;
-                }
-
-                _logger.LogWarning($"Dashboard script {scriptName} executed but did not return successful data. Error: {result.Error}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error executing dashboard script {scriptName}");
-                return null;
-            }
-        }
-
         public async Task<DcInventoryResponseModel?> GetDcInventoryAsync(DashboardFilterRequest filter)
         {
             string cacheKey = $"Dashboard_Inventory_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
@@ -104,17 +71,20 @@ namespace ForestIQ.Service
                 return finalResult;
             }
 
-            if (!filter.RefreshView)
-            {
-                await _refreshHistoryService.AddRefreshHistoryAsync(SectionName.DeepDcDiscovery, null);
-            }
-
-
             var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcInventory.ps1", vars);
-            if (!result.HasValue) return null;
+
+            if (!result.Success || !result.Data.HasValue)
+            {
+                return new DcInventoryResponseModel
+                {
+                    GeneratedAt = DateTime.UtcNow,
+                    Error = result.Error ?? "Unknown error executing inventory script.",
+                    InventoryResults = new List<DcInventoryModel>()
+                };
+            }
             
-            var mappedResult = JsonSerializer.Deserialize<DcInventoryResponseModel>(result.Value.GetRawText());
+            var mappedResult = JsonSerializer.Deserialize<DcInventoryResponseModel>(result.Data.Value.GetRawText());
 
             if (mappedResult?.InventoryResults != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
             {
@@ -164,11 +134,11 @@ namespace ForestIQ.Service
             var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcLogonSessions.ps1", vars);
             
-            if (!result.HasValue) return null;
+            if (!result.Success || !result.Data.HasValue) return null;
 
-            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
-                ? JsonSerializer.Deserialize<List<DcLogonSessionModel>>(result.Value.GetRawText()) 
-                : new List<DcLogonSessionModel> { JsonSerializer.Deserialize<DcLogonSessionModel>(result.Value.GetRawText())! };
+            var mappedResult = result.Data.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcLogonSessionModel>>(result.Data.Value.GetRawText()) 
+                : new List<DcLogonSessionModel> { JsonSerializer.Deserialize<DcLogonSessionModel>(result.Data.Value.GetRawText())! };
 
             if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
             {
@@ -221,9 +191,9 @@ namespace ForestIQ.Service
 
             var vars = $"$TargetDC = '{filter.TargetDc}'\n$AuthLookBackHours = {filter.LookBackHours}\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcAuthSummary.ps1", vars);
-            if (!result.HasValue) return null;
+            if (!result.Success || !result.Data.HasValue) return null;
 
-            var mappedResult = result.Value.ValueKind == JsonValueKind.Array ? JsonSerializer.Deserialize<List<DcAuthSummaryModel>>(result.Value.GetRawText()) : new List<DcAuthSummaryModel> { JsonSerializer.Deserialize<DcAuthSummaryModel>(result.Value.GetRawText())! };
+            var mappedResult = result.Data.Value.ValueKind == JsonValueKind.Array ? JsonSerializer.Deserialize<List<DcAuthSummaryModel>>(result.Data.Value.GetRawText()) : new List<DcAuthSummaryModel> { JsonSerializer.Deserialize<DcAuthSummaryModel>(result.Data.Value.GetRawText())! };
 
             if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
             {
@@ -275,11 +245,11 @@ namespace ForestIQ.Service
 
             var vars = $"$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcNtdsHealth.ps1", vars);
-            if (!result.HasValue) return null;
+            if (!result.Success || !result.Data.HasValue) return null;
 
-            var mappedResult = result.Value.ValueKind == JsonValueKind.Array 
-                ? JsonSerializer.Deserialize<List<DcNtdsHealthModel>>(result.Value.GetRawText())
-                : new List<DcNtdsHealthModel> { JsonSerializer.Deserialize<DcNtdsHealthModel>(result.Value.GetRawText())! };
+            var mappedResult = result.Data.Value.ValueKind == JsonValueKind.Array 
+                ? JsonSerializer.Deserialize<List<DcNtdsHealthModel>>(result.Data.Value.GetRawText())
+                : new List<DcNtdsHealthModel> { JsonSerializer.Deserialize<DcNtdsHealthModel>(result.Data.Value.GetRawText())! };
 
             if (mappedResult != null && filter.Health != "All" && !string.IsNullOrEmpty(filter.Health))
             {
@@ -293,42 +263,60 @@ namespace ForestIQ.Service
         public async Task<List<DcPerformanceResponseModel>?> GetDcPerformanceAsync(DashboardFilterRequest filter)
         {
             string cacheKey = $"Dashboard_Performance_{filter.TargetDc}";
-            
-            // Note: we might not want to heavily cache live performance stats, but we will for a few seconds if requested.
-            // But we'll follow the pattern and just query the script directly for now.
-            var vars = $"$TargetDC = '{filter.TargetDc}'";
-            var result = await ExecuteDashboardScriptAsync("Get-DcPerformance.ps1", vars);
-            
-            if (!result.HasValue) return null;
+            List<DcPerformanceLiveModel> liveStatsList = new List<DcPerformanceLiveModel>();
 
-            var rawText = result.Value.GetRawText();
-            var responses = new List<DcPerformanceResponseModel>();
-
-            using var doc = JsonDocument.Parse(rawText);
-            var root = doc.RootElement;
-
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-
-            if (root.ValueKind == JsonValueKind.Array)
+            if (!filter.RefreshView && _cache.TryGetValue(cacheKey, out List<DcPerformanceLiveModel>? cachedLiveStats))
             {
-                foreach (var item in root.EnumerateArray())
+                if (cachedLiveStats != null)
                 {
-                    var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(item.GetRawText(), options);
-                    var serverName = item.TryGetProperty("ServerName", out var sn) ? sn.GetString() : filter.TargetDc;
-                    var history = await _historyRepository.GetHistoryAsync(serverName ?? "");
-
-                    responses.Add(new DcPerformanceResponseModel
-                    {
-                        ServerName = serverName,
-                        LiveStats = liveStats,
-                        History = history
-                    });
+                    liveStatsList = cachedLiveStats;
                 }
             }
-            else if (root.ValueKind == JsonValueKind.Object)
+            
+            if (!liveStatsList.Any())
             {
-                var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(rawText, options);
-                var serverName = root.TryGetProperty("ServerName", out var sn) ? sn.GetString() : filter.TargetDc;
+                var vars = $"$TargetDC = '{filter.TargetDc}'";
+                var result = await ExecuteDashboardScriptAsync("Get-DcPerformance.ps1", vars);
+                
+                if (!result.Success || !result.Data.HasValue) return null;
+
+                var rawText = result.Data.Value.GetRawText();
+                using var doc = JsonDocument.Parse(rawText);
+                var root = doc.RootElement;
+
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in root.EnumerateArray())
+                    {
+                        var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(item.GetRawText(), options);
+                        if (liveStats != null)
+                        {
+                            liveStatsList.Add(liveStats);
+                        }
+                    }
+                }
+                else if (root.ValueKind == JsonValueKind.Object)
+                {
+                    var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(rawText, options);
+                    if (liveStats != null)
+                    {
+                        liveStatsList.Add(liveStats);
+                    }
+                }
+
+                if (liveStatsList.Any())
+                {
+                    _cache.Set(cacheKey, liveStatsList, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                }
+            }
+
+            var responses = new List<DcPerformanceResponseModel>();
+            foreach (var liveStats in liveStatsList)
+            {
+                var serverName = !string.IsNullOrEmpty(liveStats.ServerName) ? liveStats.ServerName : filter.TargetDc;
+                // Fetch history data directly from the database, bypassing the cache
                 var history = await _historyRepository.GetHistoryAsync(serverName ?? "");
 
                 responses.Add(new DcPerformanceResponseModel
@@ -352,9 +340,9 @@ namespace ForestIQ.Service
 
             var vars = $"$DomainFilter = '{domainFilter}'\n$SiteFilter = '{siteFilter}'";
             var result = await ExecuteDashboardScriptAsync("Get-DcHierarchy.ps1", vars);
-            if (!result.HasValue) return null;
+            if (!result.Success || !result.Data.HasValue) return null;
 
-            var mappedResult = result.Value.ValueKind == JsonValueKind.Array ? JsonSerializer.Deserialize<List<DcHierarchyRawModel>>(result.Value.GetRawText()) : new List<DcHierarchyRawModel> { JsonSerializer.Deserialize<DcHierarchyRawModel>(result.Value.GetRawText())! };
+            var mappedResult = result.Data.Value.ValueKind == JsonValueKind.Array ? JsonSerializer.Deserialize<List<DcHierarchyRawModel>>(result.Data.Value.GetRawText()) : new List<DcHierarchyRawModel> { JsonSerializer.Deserialize<DcHierarchyRawModel>(result.Data.Value.GetRawText())! };
 
             _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
             return mappedResult;
@@ -370,11 +358,44 @@ namespace ForestIQ.Service
 
             var vars = $"$TargetDomain = '{targetDomain}'";
             var result = await ExecuteDashboardScriptAsync("Get-DefaultDc.ps1", vars);
-            if (!result.HasValue) return null;
+            if (!result.Success || !result.Data.HasValue) return null;
 
-            var mappedResult = JsonSerializer.Deserialize<DefaultDcModel>(result.Value.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var mappedResult = JsonSerializer.Deserialize<DefaultDcModel>(result.Data.Value.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             _cache.Set(cacheKey, mappedResult, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
             return mappedResult;
+        }
+
+        private async Task<PowerShellExecutionResult> ExecuteDashboardScriptAsync(string scriptName, string variablesPrepended)
+        {
+            try
+            {
+                var scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "Dashboard", scriptName);
+
+                if (!File.Exists(scriptPath))
+                {
+                    _logger.LogError($"Dashboard script not found at path: {scriptPath}");
+                    return new PowerShellExecutionResult { Success = false, Error = $"Dashboard script not found at path: {scriptPath}" };
+                }
+
+                var scriptContent = await File.ReadAllTextAsync(scriptPath);
+                var finalScript = variablesPrepended + Environment.NewLine + scriptContent;
+
+                var request = new PowerShellScriptRequest { Script = finalScript };
+                var result = await _powerShellService.ExecuteScriptAsync(request);
+
+                if (result.Success && result.Data.HasValue)
+                {
+                    return result;
+                }
+
+                _logger.LogWarning($"Dashboard script {scriptName} executed but did not return successful data. Error: {result.Error}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error executing dashboard script {scriptName}");
+                return new PowerShellExecutionResult { Success = false, Error = $"Error executing dashboard script {scriptName}: {ex.Message}" };
+            }
         }
     }
 }

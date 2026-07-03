@@ -1,13 +1,14 @@
 using ForestIQ.Domain.DTO;
 using ForestIQ.Domain.Enums;
+using ForestIQ.Domain.Extensions;
 using ForestIQ.Domain.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using ForestIQ.Domain.Extensions;
 
 namespace ForestIQ.Controllers
 {
@@ -17,15 +18,11 @@ namespace ForestIQ.Controllers
     public class RefreshHistoryController : ControllerBase
     {
         private readonly IRefreshHistoryService _refreshHistoryService;
-
-        public RefreshHistoryController(IRefreshHistoryService refreshHistoryService)
+        private readonly IMemoryCache _memoryCache;
+        public RefreshHistoryController(IRefreshHistoryService refreshHistoryService, IMemoryCache memoryCache)
         {
             _refreshHistoryService = refreshHistoryService;
-        }
-
-        public class AddRefreshHistoryRequest
-        {
-            public SectionName SectionName { get; set; }
+            _memoryCache = memoryCache;
         }
 
         [HttpPost("add-refresh-history")]
@@ -36,7 +33,7 @@ namespace ForestIQ.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Invalid request."));
             }
 
-            await _refreshHistoryService.AddRefreshHistoryAsync(request.SectionName, null);
+            await _refreshHistoryService.AddRefreshHistoryAsync(request.SectionName, null, request.JsonData);
             return Ok(ApiResponse<string>.Ok("Refresh history added successfully."));
         }
 
@@ -55,15 +52,10 @@ namespace ForestIQ.Controllers
             return Ok(ApiResponse<List<RefreshHistory>>.Ok(history));
         }
 
-        [HttpGet("get-latest-refresh-history/{section}")]
-        public async Task<IActionResult> GetLatestRefreshHistory(SectionName section)
+        [HttpGet("get-latest-refresh-history/{historyId}")]
+        public async Task<IActionResult> GetLatestRefreshHistory(int historyId)
         {
-            if (!Enum.IsDefined(typeof(SectionName), section))
-            {
-                return BadRequest(ApiResponse<object>.Fail("Invalid section."));
-            }
-
-            var latest = await _refreshHistoryService.GetLatestAsync(section);
+            var latest = await _refreshHistoryService.GetLatestAsync(historyId);
             return Ok(ApiResponse<RefreshHistory>.Ok(latest));
         }
 
@@ -81,6 +73,54 @@ namespace ForestIQ.Controllers
                                .ToList();
 
             return Ok(ApiResponse<object>.Ok(sections));
+        }
+
+        [AllowAnonymous]
+        [HttpPost("check-cache")]
+        public IActionResult CheckCache(CheckCacheRequest checkCacheRequest)
+        {
+            if (string.IsNullOrEmpty(checkCacheRequest.section))
+            {
+                return Ok(ApiResponse<bool>.Ok(false));
+            }
+
+            if (!Enum.TryParse(typeof(SectionName), checkCacheRequest.section, true, out var parsedSection) || parsedSection == null)
+            {
+                return BadRequest(ApiResponse<object>.Fail("Invalid section name."));
+            }
+
+            var sec = (SectionName)parsedSection;
+            bool cacheExists = false;
+
+            if (sec == SectionName.ForestOverview)
+            {
+                string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "all" : checkCacheRequest.domain;
+                string s = string.IsNullOrEmpty(checkCacheRequest.site) ? "all" : checkCacheRequest.site;
+                
+                cacheExists = _memoryCache.TryGetValue($"AD_DIAGNOSTICS_GRAPH_{d}_{s}", out _);
+                if (!cacheExists) 
+                {
+                    cacheExists = _memoryCache.TryGetValue("AD_DIAGNOSTICS_GRAPH_all_all", out _);
+                }
+            }
+            else if (sec == SectionName.DeepDcDiscovery)
+            {
+                string tDc = string.IsNullOrEmpty(checkCacheRequest.targetDc) ? "All" : checkCacheRequest.targetDc;
+                string f = string.IsNullOrEmpty(checkCacheRequest.forest) ? "All" : checkCacheRequest.forest;
+                string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "All" : checkCacheRequest.domain;
+                string s = string.IsNullOrEmpty(checkCacheRequest.site) ? "All" : checkCacheRequest.site;
+                string h = string.IsNullOrEmpty(checkCacheRequest.health) ? "All" : checkCacheRequest.health;
+
+                string cacheKey = $"Dashboard_Inventory_{tDc}_{f}_{d}_{s}_{h}";
+                cacheExists = _memoryCache.TryGetValue(cacheKey, out _);
+
+                if (!cacheExists)
+                {
+                    cacheExists = _memoryCache.TryGetValue("Dashboard_Inventory_All_All_All_All_All", out _);
+                }
+            }
+
+            return Ok(ApiResponse<bool>.Ok(cacheExists));
         }
     }
 }

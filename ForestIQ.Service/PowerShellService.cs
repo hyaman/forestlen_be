@@ -567,6 +567,7 @@ namespace ForestIQ.Service
             if (hosts.Count == 0)
             {
                 _logger.LogWarning("All resolution attempts failed for domain: {Domain}", domainName);
+                response.DomainControllerDiscoveryError = "All resolution attempts failed for the specified domain.";
                 return response;
             }
 
@@ -608,6 +609,7 @@ namespace ForestIQ.Service
 
             if (string.IsNullOrWhiteSpace(request.UserName) || string.IsNullOrWhiteSpace(request.Password))
             {
+                response.DomainControllerDiscoveryError = "Username and password are required for domain controller discovery.";
                 return response;
             }
 
@@ -681,23 +683,87 @@ namespace ForestIQ.Service
 
             if (!string.IsNullOrEmpty(domain))
             {
+                var isExactDomain = new Func<string?, string, bool>((hostName, d) =>
+                {
+                    if (string.IsNullOrEmpty(hostName) || string.IsNullOrEmpty(d)) return false;
+                    if (!hostName.EndsWith(d, StringComparison.OrdinalIgnoreCase)) return false;
+                    var prefix = hostName.Substring(0, hostName.Length - d.Length);
+                    if (prefix.Length == 0) return true;
+                    if (prefix.EndsWith("."))
+                    {
+                        prefix = prefix.TrimEnd('.');
+                        return !prefix.Contains('.');
+                    }
+                    return false;
+                });
+
                 if (topologyModel != null)
                 {
                     topologyModel.Domains = topologyModel.Domains?.Where(d => string.Equals(d.DomainName, domain, StringComparison.OrdinalIgnoreCase)).ToList();
-                    topologyModel.DomainControllers = topologyModel.DomainControllers?.Where(dc => dc.HostName?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
+                    topologyModel.DomainControllers = topologyModel.DomainControllers?.Where(dc => isExactDomain(dc.HostName, domain)).ToList();
                     topologyModel.TopLevelOUs = topologyModel.TopLevelOUs?.Where(ou => string.Equals(ou.Domain, domain, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (topologyModel.DomainControllers != null)
+                    {
+                        var validSiteNames = topologyModel.DomainControllers.Select(dc => dc.Site).Where(s => !string.IsNullOrEmpty(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet();
+                        topologyModel.Sites = topologyModel.Sites?.Where(s => s.Name != null && validSiteNames.Contains(s.Name)).ToList();
+                        topologyModel.Subnets = topologyModel.Subnets?.Where(s => s.Site != null && validSiteNames.Contains(s.Site)).ToList();
+                        topologyModel.SiteSubnetDCMapping = topologyModel.SiteSubnetDCMapping?.Where(s => s.SiteName != null && validSiteNames.Contains(s.SiteName)).ToList();
+                    }
                 }
 
                 if (replicationModel != null)
                 {
                     replicationModel.ReplicationPartners = replicationModel.ReplicationPartners?.Where(rp => string.Equals(rp.Domain, domain, StringComparison.OrdinalIgnoreCase)).ToList();
-                    replicationModel.ReplicationFailures = replicationModel.ReplicationFailures?.Where(rf => rf.Server?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
+                    replicationModel.ReplicationFailures = replicationModel.ReplicationFailures?.Where(rf => isExactDomain(rf.DomainController, domain) || isExactDomain(rf.Server, domain)).ToList();
+
+                    var validShortNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var validHostNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    if (topologyModel?.DomainControllers != null)
+                    {
+                        foreach (var dc in topologyModel.DomainControllers)
+                        {
+                            if (!string.IsNullOrEmpty(dc.HostName))
+                            {
+                                validHostNames.Add(dc.HostName);
+                                validShortNames.Add(dc.HostName.Split('.')[0]);
+                            }
+                        }
+                    }
+                    else if (replicationModel.ReplicationPartners != null)
+                    {
+                        foreach (var rp in replicationModel.ReplicationPartners)
+                        {
+                            if (!string.IsNullOrEmpty(rp.DomainController))
+                            {
+                                validHostNames.Add(rp.DomainController);
+                                validShortNames.Add(rp.DomainController.Split('.')[0]);
+                            }
+                        }
+                    }
+
+                    if (replicationModel.ReplicationConnections != null && validShortNames.Count > 0)
+                    {
+                        replicationModel.ReplicationConnections = replicationModel.ReplicationConnections.Where(c => 
+                            (c.SourceDC != null && (validShortNames.Contains(c.SourceDC) || validHostNames.Contains(c.SourceDC))) || 
+                            (c.TargetDC != null && (validShortNames.Contains(c.TargetDC) || validHostNames.Contains(c.TargetDC)))).ToList();
+                    }
+
+                    if (replicationModel.RepadminSummary != null && validShortNames.Count > 0)
+                    {
+                        if (replicationModel.RepadminSummary.SourceDSA != null)
+                            replicationModel.RepadminSummary.SourceDSA = replicationModel.RepadminSummary.SourceDSA.Where(s => s.Server != null && (validShortNames.Contains(s.Server) || validHostNames.Contains(s.Server))).ToList();
+                        
+                        if (replicationModel.RepadminSummary.DestinationDSA != null)
+                            replicationModel.RepadminSummary.DestinationDSA = replicationModel.RepadminSummary.DestinationDSA.Where(s => s.Server != null && (validShortNames.Contains(s.Server) || validHostNames.Contains(s.Server))).ToList();
+                    }
                 }
 
                 if (diagModel != null)
                 {
-                    diagModel.PortConnectivity = diagModel.PortConnectivity?.Where(p => p.DomainController?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
-                    diagModel.DcDiagSummary = diagModel.DcDiagSummary?.Where(d => d.DomainController?.EndsWith(domain, StringComparison.OrdinalIgnoreCase) == true).ToList();
+                    diagModel.PortConnectivity = diagModel.PortConnectivity?.Where(p => isExactDomain(p.DomainController, domain)).ToList();
+                    diagModel.DcDiagSummary = diagModel.DcDiagSummary?.Where(d => isExactDomain(d.DomainController, domain)).ToList();
                 }
             }
 
@@ -865,19 +931,15 @@ namespace ForestIQ.Service
 
             foreach (var dnsServer in dnsServers)
             {
-                var hosts = await QuerySrvHostsAsync(srvQuery, new LookupClient(new IPEndPoint(dnsServer, 53)));
+                var options = new LookupClientOptions(new IPEndPoint(dnsServer, 53)) { UseCache = false, UseTcpFallback = true };
+                var hosts = await QuerySrvHostsAsync(srvQuery, new LookupClient(options));
                 if (hosts.Count > 0)
                 {
-                    _logger.LogInformation(
-                        "Resolved domain controllers for '{Domain}' via SRV on DNS server '{DnsServer}': {Hosts}",
-                        domainName,
-                        dnsServer,
-                        string.Join(", ", hosts));
                     return hosts;
                 }
             }
 
-            var fallbackHosts = await QuerySrvHostsAsync(srvQuery, new LookupClient());
+            var fallbackHosts = await QuerySrvHostsAsync(srvQuery, CreateSystemLookupClient());
             if (fallbackHosts.Count > 0)
             {
                 _logger.LogInformation(
@@ -931,6 +993,42 @@ namespace ForestIQ.Service
             return hosts;
         }
 
+        private LookupClient CreateSystemLookupClient()
+        {
+            try
+            {
+                if (File.Exists("/etc/resolv.conf"))
+                {
+                    var lines = File.ReadAllLines("/etc/resolv.conf");
+                    var endpoints = new List<IPEndPoint>();
+                    foreach (var line in lines)
+                    {
+                        var trimmed = line.Trim();
+                        if (trimmed.StartsWith("nameserver", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length > 1 && IPAddress.TryParse(parts[1], out var ip))
+                            {
+                                endpoints.Add(new IPEndPoint(ip, 53));
+                            }
+                        }
+                    }
+                    if (endpoints.Count > 0)
+                    {
+                        var options = new LookupClientOptions(endpoints.ToArray()) { UseCache = false, UseTcpFallback = true };
+                        return new LookupClient(options);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse /etc/resolv.conf manually");
+            }
+            
+            var defaultOptions = new LookupClientOptions() { UseCache = false, UseTcpFallback = true };
+            return new LookupClient(defaultOptions);
+        }
+
         private async Task<IPAddress[]?> TryAdDnsAsync(string domainName)
         {
             var dnsServers = GetLocalDnsServers();
@@ -947,9 +1045,10 @@ namespace ForestIQ.Service
                 {
                     _logger.LogInformation("Trying DNS server '{DnsServer}' for '{Domain}'", dnsServer, domainName);
 
-                    // ? dnsServer is already IPAddress  no Parse() needed
+                    // ? dnsServer is already IPAddress   no Parse() needed
                     var endpoint = new IPEndPoint(dnsServer, 53);
-                    var dnsClient = new LookupClient(endpoint);
+                    var options = new LookupClientOptions(endpoint) { UseCache = false, UseTcpFallback = true };
+                    var dnsClient = new LookupClient(options);
 
                     var result = await dnsClient.QueryAsync(domainName, QueryType.A);
 
@@ -974,8 +1073,28 @@ namespace ForestIQ.Service
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "DNS server '{DnsServer}' failed for '{Domain}'", dnsServer, domainName);
+                    _logger.LogWarning(ex, "DNS server '{DnsServer}' failed for '{Domain}'", dnsServer, domainName);
                 }
+            }
+
+            try
+            {
+                var dnsClient = CreateSystemLookupClient();
+                var result = await dnsClient.QueryAsync(domainName, QueryType.A);
+                var ips = result.Answers.ARecords().Select(r => r.Address).ToArray();
+                var privateIps = ips.Where(IsPrivateIp).ToArray();
+
+                if (privateIps.Length > 0)
+                {
+                    _logger.LogInformation(
+                        "Resolved '{Domain}' via system default DNS to private IPs: {IPs}",
+                        domainName, string.Join(", ", privateIps.Select(i => i.ToString())));
+                    return privateIps;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "System default DNS failed for '{Domain}'", domainName);
             }
 
             _logger.LogWarning("All DNS servers failed to resolve '{Domain}'", domainName);

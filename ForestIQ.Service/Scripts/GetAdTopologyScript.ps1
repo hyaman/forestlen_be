@@ -103,7 +103,7 @@ try
 {
     $report.Domains = foreach ($domainName in $forest.Domains)
     {
-        if ($global:FilterDomain -and ($domainName -notmatch $global:FilterDomain)) { continue }
+        if ($global:FilterDomain -and ($domainName -ne $global:FilterDomain)) { continue }
         try
         {
             $domainInfo = Get-ADDomain -Server $domainName -Credential $cred -ErrorAction Stop
@@ -128,8 +128,7 @@ try
 catch { $report.Errors += [pscustomobject]@{ Section = 'ForestDiscovery'; Error = $_.Exception.Message } }
 $report.Timings.Add([pscustomobject]@{ Section = 'Domains'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
 
-$report.Sites = $allSites | Select-Object Name, Description
-$report.Subnets = $allSubnets | Select-Object Name, Site, Location, Description
+
 
 $t0 = Get-Date
 try
@@ -158,7 +157,7 @@ $t0 = Get-Date
 try
 {
     foreach ($d in $forest.Domains) {
-        if ($global:FilterDomain -and ($d -notmatch $global:FilterDomain)) { continue }
+        if ($global:FilterDomain -and ($d -ne $global:FilterDomain)) { continue }
         try {
             $domainDCs = @(Get-ADDomainController -Filter * -Server $d -Credential $cred -ErrorAction Stop | Select-Object HostName, Name, Site, IPv4Address, IsGlobalCatalog, IsReadOnly, OperatingSystem, OperatingSystemVersion, @{Name = 'UptimeHours'; Expression = { $uptime = 0; try { $cim = Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $_.HostName -ErrorAction Stop; $uptime = [math]::Round((Get-Date).Subtract($cim.LastBootUpTime).TotalHours, 1) } catch {}; $uptime }}, OperationMasterRoles)
             if ($global:FilterSite) { $domainDCs = @($domainDCs | Where-Object { $_.Site -match $global:FilterSite }) }
@@ -169,6 +168,20 @@ try
 }
 catch { $report.Errors += [pscustomobject]@{ Section = 'DomainControllers'; Error = $_.Exception.Message } }
 $report.Timings.Add([pscustomobject]@{ Section = 'DomainControllers'; ElapsedSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 2) })
+
+if ($global:FilterDomain) {
+    $validSiteNames = $dcs | Select-Object -ExpandProperty Site -Unique
+    if ($validSiteNames) {
+        $allSites = $allSites | Where-Object { $validSiteNames -contains $_.Name }
+        $allSubnets = $allSubnets | Where-Object { $validSiteNames -contains $_.Site }
+    } else {
+        $allSites = @()
+        $allSubnets = @()
+    }
+}
+
+$report.Sites = $allSites | Select-Object Name, Description
+$report.Subnets = $allSubnets | Select-Object Name, Site, Location, Description
 
 $t0 = Get-Date
 try

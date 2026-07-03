@@ -13,6 +13,9 @@ namespace ForestIQ.Domain.Models.Dashboard
 
         [JsonPropertyName("InventoryResults")]
         public List<DcInventoryModel>? InventoryResults { get; set; }
+
+        [JsonPropertyName("Error")]
+        public string? Error { get; set; }
     }
 
     // Intended to be reused when script results are stored in the database in the future.

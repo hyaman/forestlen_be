@@ -52,16 +52,35 @@ foreach ($DCName in $DCs) {
                 }
             }
 
-            # 3. Disk (C:)
-            $DiskC = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
+            # 3. Disks
+            $Disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue
+            $LocalDisks = @()
             $DiskCFree = 0
-            if ($DiskC) {
-                $DiskCFree = [math]::Round(($DiskC.FreeSpace / $DiskC.Size) * 100, 2)
+            $DiskCSizeGB = 0
+            $DiskCFreeGB = 0
+
+            if ($Disks) {
+                foreach ($disk in $Disks) {
+                    $SizeGB = [math]::Round($disk.Size / 1GB, 2)
+                    $FreeGB = [math]::Round($disk.FreeSpace / 1GB, 2)
+                    $LocalDisks += [PSCustomObject]@{
+                        DriveLetter = $disk.DeviceID
+                        SizeGB      = $SizeGB
+                        FreeGB      = $FreeGB
+                    }
+                    if ($disk.DeviceID -eq 'C:') {
+                        $DiskCFree = [math]::Round(($disk.FreeSpace / $disk.Size) * 100, 2)
+                        $DiskCSizeGB = $SizeGB
+                        $DiskCFreeGB = $FreeGB
+                    }
+                }
             }
 
             # 4. Top 10 Processes by CPU/Memory
-            $cores = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+            $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue
+            $cores = [int]($cpuInfo | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
             if (-not $cores -or $cores -eq 0) { $cores = 1 }
+            $CpuModel = if ($cpuInfo) { ($cpuInfo | Select-Object -First 1).Name } else { "Unknown" }
 
             $ProcessCounters = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue
             if ($ProcessCounters) {
@@ -107,27 +126,45 @@ foreach ($DCName in $DCs) {
             }
 
             [PSCustomObject]@{
-                ServerName   = $Computer
-                CpuLoad      = $CpuLoad
-                MemoryUsage  = $MemoryUsage
-                DiskCFree    = $DiskCFree
-                UptimeDays   = $UptimeDays
-                LastBoot     = $OS.LastBootUpTime
-                OsVersion    = "$($OS.Caption) (Build $($OS.BuildNumber))"
-                TopProcesses = $Processes
-                NetworkIo    = $NetworkIo
+                ServerName          = $Computer
+                CpuLoad             = $CpuLoad
+                MemoryUsage         = $MemoryUsage
+                DiskCFree           = $DiskCFree
+                DiskCSizeGB         = $DiskCSizeGB
+                DiskCFreeGB         = $DiskCFreeGB
+                LocalDisks          = $LocalDisks
+                TotalProcesses      = $OS.NumberOfProcesses
+                VirtualMemorySizeKB = $OS.TotalVirtualMemorySize
+                FreeVirtualMemoryKB = $OS.FreeVirtualMemory
+                CpuModel            = $CpuModel
+                LogicalCores        = $cores
+                UptimeDays          = $UptimeDays
+                LastBoot            = $OS.LastBootUpTime
+                OsVersion           = "$($OS.Caption) (Build $($OS.BuildNumber))"
+                TopProcesses        = $Processes
+                NetworkIo           = $NetworkIo
             }
         }
         catch {
             [PSCustomObject]@{
-                ServerName   = $Computer
-                CpuLoad      = 0
-                MemoryUsage  = 0
-                DiskCFree    = 0
-                UptimeDays   = 0
-                TopProcesses = @()
-                NetworkIo    = 0
-                Error        = $_.Exception.Message
+                ServerName          = $Computer
+                CpuLoad             = 0
+                MemoryUsage         = 0
+                DiskCFree           = 0
+                DiskCSizeGB         = 0
+                DiskCFreeGB         = 0
+                LocalDisks          = @()
+                TotalProcesses      = 0
+                VirtualMemorySizeKB = 0
+                FreeVirtualMemoryKB = 0
+                CpuModel            = "Unknown"
+                LogicalCores        = 0
+                UptimeDays          = 0
+                LastBoot            = $null
+                OsVersion           = "Unknown"
+                TopProcesses        = @()
+                NetworkIo           = 0
+                Error               = $_.Exception.Message
             }
         }
     } -ErrorAction SilentlyContinue
