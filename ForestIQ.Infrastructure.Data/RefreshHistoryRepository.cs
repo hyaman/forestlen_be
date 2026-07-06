@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace ForestIQ.Infrastructure.Data
 {
@@ -26,23 +27,70 @@ namespace ForestIQ.Infrastructure.Data
 
         public async Task<List<RefreshHistory>> GetHistoryAsync(SectionName sectionName)
         {
-            return await _context.RefreshHistories
-                .Where(r => r.SectionName == sectionName)
-                .OrderByDescending(r => r.RefreshTime)
-                .Select(r => new RefreshHistory
+            var latestIdsQuery = _context.RefreshHistories
+                .Where(r => r.SectionName == sectionName && r.DiscoverID != null)
+                .GroupBy(r => r.DiscoverID)
+                .Select(g => g.OrderByDescending(x => x.RefreshTime).Select(x => x.Id).FirstOrDefault());
+
+            var groupedData = await _context.RefreshHistories
+                .Where(r => latestIdsQuery.Contains(r.Id))
+                .Select(x => new
                 {
-                    Id = r.Id,
-                    SectionName = r.SectionName,
-                    RefreshTime = r.RefreshTime,
-                    CreatedAt = r.CreatedAt
+                    x.Id,
+                    x.SectionName,
+                    x.RefreshTime,
+                    x.CreatedAt,
+                    x.DiscoverID,
+                    x.DCName
                 })
                 .ToListAsync();
+
+            var ungroupedData = await _context.RefreshHistories
+                .Where(r => r.SectionName == sectionName && r.DiscoverID == null)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.SectionName,
+                    x.RefreshTime,
+                    x.CreatedAt,
+                    x.DiscoverID,
+                    x.DCName
+                })
+                .ToListAsync();
+
+            return groupedData
+                .Concat(ungroupedData)
+                .Select(x => new RefreshHistory
+                {
+                    Id = x.Id,
+                    SectionName = x.SectionName,
+                    RefreshTime = x.RefreshTime,
+                    CreatedAt = x.CreatedAt,
+                    DiscoverID = x.DiscoverID,
+                    DCName = x.DCName
+                })
+                .OrderByDescending(x => x.RefreshTime)
+                .ToList();
+
+
         }
 
-        public async Task<RefreshHistory?> GetLatestAsync(int id)
+        public async Task<RefreshHistory?> GetLatestAsync(int HistoryId, Guid? DiscoveryId, string? Dcname)
         {
-            return await _context.RefreshHistories
-                .Where(r => r.Id == id)
+            if(DiscoveryId == null)
+            {
+                return await _context.RefreshHistories.Where(r => r.Id == HistoryId).FirstOrDefaultAsync();
+            }
+
+            var query = _context.RefreshHistories.Where(r => r.DiscoverID == DiscoveryId);
+
+            if (!string.IsNullOrEmpty(Dcname))
+            {
+                query = query.Where(r => r.DCName == Dcname);
+            }
+
+            return await query
+                .OrderBy(r => r.Id)
                 .FirstOrDefaultAsync();
         }
 

@@ -141,10 +141,7 @@ namespace ForestIQ.Service
             var isDebug = Runtime.Debug.Enabled;
             foreach (var host in hostsToTry)
             {
-                _logger.LogInformation(
-                    "==================================================",
-                    host,
-                    request.DomainName);
+                _logger.LogInformation("==================================================",host,request.DomainName);
                 _logger.LogInformation("Connect Step 4: Attempting Kerberos WinRM connection to {Host} for domain {Domain}", host, request.DomainName);
 
                 request.RemoteHost = host;
@@ -339,8 +336,6 @@ namespace ForestIQ.Service
                         return FilterAndMapGraphResponse(globalCachedResult.Data.Value, domain, site);
                     }
                 }
-
-                await _refreshHistoryService.AddRefreshHistoryAsync(SectionName.ForestOverview, null);
             }
 
             var powerShellConnectionRequest = CheckAndGetSession("", domain, site);

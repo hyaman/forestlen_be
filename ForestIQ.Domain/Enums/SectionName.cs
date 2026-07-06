@@ -10,6 +10,9 @@ namespace ForestIQ.Domain.Enums
         ForestOverview,
 
         [EnumMember(Value = "deep-dc-discovery")]
-        DeepDcDiscovery
+        DeepDcDiscovery,
+
+        [EnumMember(Value = "deep-dns-health")]
+        DeepDnsHealth
     }
 }

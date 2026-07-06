@@ -33,7 +33,7 @@ namespace ForestIQ.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Invalid request."));
             }
 
-            await _refreshHistoryService.AddRefreshHistoryAsync(request.SectionName, null, request.JsonData);
+            await _refreshHistoryService.AddRefreshHistoryAsync(request);
             return Ok(ApiResponse<string>.Ok("Refresh history added successfully."));
         }
 
@@ -41,7 +41,7 @@ namespace ForestIQ.Controllers
         [HttpGet("get-refresh-history/{section}")]
         public async Task<IActionResult> GetRefreshHistory(string section)
         {
-            if(string.IsNullOrEmpty(section))
+            if (string.IsNullOrEmpty(section))
             {
                 return Ok(ApiResponse<List<RefreshHistory>>.Ok(new List<RefreshHistory>()));
             }
@@ -52,10 +52,10 @@ namespace ForestIQ.Controllers
             return Ok(ApiResponse<List<RefreshHistory>>.Ok(history));
         }
 
-        [HttpGet("get-latest-refresh-history/{historyId}")]
-        public async Task<IActionResult> GetLatestRefreshHistory(int historyId)
+        [HttpGet("get-latest-refresh-history")]
+        public async Task<IActionResult> GetLatestRefreshHistory([FromQuery] int HistoryId, [FromQuery] Guid? DiscoveryID, [FromQuery] string? DcName)
         {
-            var latest = await _refreshHistoryService.GetLatestAsync(historyId);
+            var latest = await _refreshHistoryService.GetLatestAsync(HistoryId, DiscoveryID, DcName);
             return Ok(ApiResponse<RefreshHistory>.Ok(latest));
         }
 
@@ -96,9 +96,9 @@ namespace ForestIQ.Controllers
             {
                 string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "all" : checkCacheRequest.domain;
                 string s = string.IsNullOrEmpty(checkCacheRequest.site) ? "all" : checkCacheRequest.site;
-                
+
                 cacheExists = _memoryCache.TryGetValue($"AD_DIAGNOSTICS_GRAPH_{d}_{s}", out _);
-                if (!cacheExists) 
+                if (!cacheExists)
                 {
                     cacheExists = _memoryCache.TryGetValue("AD_DIAGNOSTICS_GRAPH_all_all", out _);
                 }
@@ -117,6 +117,21 @@ namespace ForestIQ.Controllers
                 if (!cacheExists)
                 {
                     cacheExists = _memoryCache.TryGetValue("Dashboard_Inventory_All_All_All_All_All", out _);
+                }
+            }
+            else if (sec == SectionName.DeepDnsHealth)
+            {
+                string tDc = string.IsNullOrEmpty(checkCacheRequest.targetDc) ? "All" : checkCacheRequest.targetDc;
+                string f = string.IsNullOrEmpty(checkCacheRequest.forest) ? "All" : checkCacheRequest.forest;
+                string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "All" : checkCacheRequest.domain;
+                string s = string.IsNullOrEmpty(checkCacheRequest.site) ? "All" : checkCacheRequest.site;
+
+                string cacheKey = $"DNSXRAY_Servers_{tDc}_{f}_{d}_{s}";
+                cacheExists = _memoryCache.TryGetValue(cacheKey, out _);
+
+                if (!cacheExists)
+                {
+                    cacheExists = _memoryCache.TryGetValue("DNSXRAY_Servers_All_All_All_All", out _);
                 }
             }
 

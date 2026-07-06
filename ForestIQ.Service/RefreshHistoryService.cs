@@ -4,6 +4,7 @@ using ForestIQ.Domain.Interface;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace ForestIQ.Service
 {
@@ -16,15 +17,17 @@ namespace ForestIQ.Service
             _repository = repository;
         }
 
-        public async Task AddRefreshHistoryAsync(SectionName sectionName, string? triggeredBy, string? jsonData = null)
+        public async Task AddRefreshHistoryAsync(AddRefreshHistoryRequest request)
         {
             var history = new RefreshHistory
             {
-                SectionName = sectionName,
+                SectionName = request.SectionName,
                 RefreshTime = DateTime.Now,
-                TriggeredBy = triggeredBy,
+                TriggeredBy = null,
                 CreatedAt = DateTime.Now,
-                JsonData = jsonData
+                JsonData = request.JsonData,
+                DiscoverID = request.DiscoverID,
+                DCName = request.DCName
             };
 
             await _repository.AddAsync(history);
@@ -35,9 +38,9 @@ namespace ForestIQ.Service
             return await _repository.GetHistoryAsync(sectionName);
         }
 
-        public async Task<RefreshHistory?> GetLatestAsync(int id)
+        public async Task<RefreshHistory?> GetLatestAsync(int HistoryId, Guid? DiscoveryId, string? DcName)
         {
-            return await _repository.GetLatestAsync(id);
+            return await _repository.GetLatestAsync(HistoryId, DiscoveryId, DcName);
         }
     }
 }

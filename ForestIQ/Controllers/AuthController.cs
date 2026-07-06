@@ -164,14 +164,14 @@ namespace ForestIQ.Controllers
         [HttpPost("logout")]
         public IActionResult Logout()
         {
-            var connectionId = User.FindFirst("connectionId")?.Value;
+            //var connectionId = User.FindFirst("connectionId")?.Value;
 
-            if (!string.IsNullOrWhiteSpace(connectionId))
-            {
-                _cache.Remove(connectionId);
-            }
+            //if (!string.IsNullOrWhiteSpace(connectionId))
+            //{
+            //    _cache.Remove(connectionId);
+            //}
 
-            _powerShellService.ClearCache();
+            //_powerShellService.ClearCache();
 
             return Ok(new
             {

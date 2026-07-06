@@ -11,5 +11,7 @@ namespace ForestIQ.Domain.DTO
         public string? TriggeredBy { get; set; }
         public DateTime CreatedAt { get; set; }
         public string? JsonData { get; set; }
+        public Guid? DiscoverID { get; set; }
+        public string? DCName { get; set; } 
     }
 }
