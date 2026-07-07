@@ -69,10 +69,19 @@ namespace ForestIQ.Service
         private async Task<T?> ExecuteAndDeserializeAsync<T>(string scriptName, string variablesPrepended) where T : class
         {
             var result = await ExecuteScriptAsync(scriptName, variablesPrepended);
-            if (!result.Success || !result.Data.HasValue) return null;
+            if (!result.Success) return null;
+
+            if (!result.Data.HasValue || result.Data.Value.ValueKind == JsonValueKind.Null)
+            {
+                if (typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(List<>))
+                {
+                    return Activator.CreateInstance<T>();
+                }
+                return default;
+            }
 
             var rawText = result.Data.Value.GetRawText();
-            if (string.IsNullOrWhiteSpace(rawText) || rawText == "[]") return default;
+            if (string.IsNullOrWhiteSpace(rawText)) return default;
 
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -171,14 +180,14 @@ namespace ForestIQ.Service
 
         public async Task<List<DuplicateRecordDto>?> GetDuplicateRecordsAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_DuplicateRecords_{filter.DnsServer}_{filter.ZoneName}";
+            string cacheKey = $"DNSXRAY_DuplicateRecords_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<DuplicateRecordDto>? cachedData))
             {
                 return cachedData;
             }
 
-            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$HealthFilter = '{filter.Health}'";
             var result = await ExecuteAndDeserializeAsync<List<DuplicateRecordDto>>("DuplicateRecords.ps1", vars);
 
             if (result != null)
@@ -191,14 +200,14 @@ namespace ForestIQ.Service
 
         public async Task<List<IntegrityFindingDto>?> GetRecordIntegrityAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_RecordIntegrity_{filter.DnsServer}_{filter.ZoneName}";
+            string cacheKey = $"DNSXRAY_RecordIntegrity_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<IntegrityFindingDto>? cachedData))
             {
                 return cachedData;
             }
 
-            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$HealthFilter = '{filter.Health}'";
             var result = await ExecuteAndDeserializeAsync<List<IntegrityFindingDto>>("RecordIntegrity.ps1", vars);
 
             if (result != null)
@@ -211,14 +220,14 @@ namespace ForestIQ.Service
 
         public async Task<List<BestPracticeCheckDto>?> GetBestPracticesAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_BestPractices_{filter.DnsServer}_{filter.ZoneName}";
+            string cacheKey = $"DNSXRAY_BestPractices_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<BestPracticeCheckDto>? cachedData))
             {
                 return cachedData;
             }
 
-            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$HealthFilter = '{filter.Health}'";
             var result = await ExecuteAndDeserializeAsync<List<BestPracticeCheckDto>>("BestPractices.ps1", vars);
 
             if (result != null)
@@ -231,14 +240,14 @@ namespace ForestIQ.Service
 
         public async Task<List<SoaComparisonDto>?> GetSoaInformationAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_SoaInformation_{filter.ZoneName}";
+            string cacheKey = $"DNSXRAY_SoaInformation_{filter.DnsServer}_{filter.ZoneName}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<SoaComparisonDto>? cachedData))
             {
                 return cachedData;
             }
 
-            var vars = $"$ZoneName = '{filter.ZoneName}'";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'";
             var result = await ExecuteAndDeserializeAsync<List<SoaComparisonDto>>("SoaInformation.ps1", vars);
 
             if (result != null)
@@ -251,14 +260,14 @@ namespace ForestIQ.Service
 
         public async Task<List<ResolutionTestDto>?> GetResolutionTestsAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_ResolutionTests_{filter.DnsServer}";
+            string cacheKey = $"DNSXRAY_ResolutionTests_{filter.DnsServer}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<ResolutionTestDto>? cachedData))
             {
                 return cachedData;
             }
 
-            var vars = $"$DnsServer = '{filter.DnsServer}'";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$HealthFilter = '{filter.Health}'";
             var result = await ExecuteAndDeserializeAsync<List<ResolutionTestDto>>("ResolutionTests.ps1", vars);
 
             if (result != null)
@@ -267,6 +276,98 @@ namespace ForestIQ.Service
             }
 
             return result;
+        }
+
+        public async Task<DnsReplicationReportDto?> GetReplicationsAsync(DnsXrayFilterRequest filter)
+        {
+            string cacheKey = $"DNSXRAY_Replications_{filter.DnsServer}_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
+
+            if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out DnsReplicationReportDto? cachedData))
+            {
+                return cachedData;
+            }
+
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$TargetDC = '{filter.TargetDc}'\n$ForestFilter = '{filter.Forest}'\n$DomainFilter = '{filter.Domain}'\n$SiteFilter = '{filter.Site}'\n$HealthFilter = '{filter.Health}'";
+            var result = await ExecuteAndDeserializeAsync<DnsReplicationReportDto>("Replications.ps1", vars);
+
+            if (result != null)
+            {
+                _memoryCache.Set(cacheKey, result, _cacheDuration);
+            }
+
+            return result;
+        }
+        public async Task<List<RecordDto>?> GetCleanupCandidatesAsync(DnsXrayFilterRequest filter)
+        {
+            string cacheKey = $"DNSXRAY_CleanupCandidates_{filter.DnsServer}_{filter.ZoneName}_{filter.StaleRecordDays}";
+
+            if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<RecordDto>? cachedData))
+            {
+                return cachedData;
+            }
+
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$StaleRecordDays = {filter.StaleRecordDays}\n$CountOnly = $false";
+            var result = await ExecuteAndDeserializeAsync<List<RecordDto>>("CleanupCandidates.ps1", vars);
+
+            if (result != null)
+            {
+                _memoryCache.Set(cacheKey, result, _cacheDuration);
+            }
+
+            return result;
+        }
+
+        public async Task<CountDto?> GetCleanupCandidatesCountAsync(DnsXrayFilterRequest filter)
+        {
+            string cacheKey = $"DNSXRAY_CleanupCandidatesCount_{filter.DnsServer}_{filter.ZoneName}_{filter.StaleRecordDays}";
+
+            if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out CountDto? cachedData))
+            {
+                return cachedData;
+            }
+
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$StaleRecordDays = {filter.StaleRecordDays}\n$CountOnly = $true";
+            
+            var result = await ExecuteScriptAsync("CleanupCandidates.ps1", vars);
+            if (!result.Success || !result.Data.HasValue) return null;
+
+            var rawText = result.Data.Value.GetRawText();
+            if (string.IsNullOrWhiteSpace(rawText) || rawText == "[]") return default;
+
+            var countResult = System.Text.Json.JsonSerializer.Deserialize<CountDto>(rawText, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (countResult != null)
+            {
+                _memoryCache.Set(cacheKey, countResult, _cacheDuration);
+            }
+
+            return countResult;
+        }
+        public async Task<DashboardSummaryDto?> GetDashboardSummaryAsync(DnsXrayFilterRequest filter)
+        {
+            string cacheKey = $"DNSXRAY_DashboardSummary_{filter.DnsServer}_{filter.ZoneName}";
+
+            if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out DashboardSummaryDto? cachedData))
+            {
+                return cachedData;
+            }
+
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'";
+            
+            var result = await ExecuteScriptAsync("DashboardSummary.ps1", vars);
+            if (!result.Success || !result.Data.HasValue) return null;
+
+            var rawText = result.Data.Value.GetRawText();
+            if (string.IsNullOrWhiteSpace(rawText) || rawText == "[]") return default;
+
+            var summaryResult = System.Text.Json.JsonSerializer.Deserialize<DashboardSummaryDto>(rawText, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (summaryResult != null)
+            {
+                _memoryCache.Set(cacheKey, summaryResult, _cacheDuration);
+            }
+
+            return summaryResult;
         }
     }
 }

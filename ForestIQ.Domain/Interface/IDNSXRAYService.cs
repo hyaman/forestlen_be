@@ -16,5 +16,9 @@ namespace ForestIQ.Domain.Interface
         Task<List<BestPracticeCheckDto>?> GetBestPracticesAsync(DnsXrayFilterRequest filter);
         Task<List<SoaComparisonDto>?> GetSoaInformationAsync(DnsXrayFilterRequest filter);
         Task<List<ResolutionTestDto>?> GetResolutionTestsAsync(DnsXrayFilterRequest filter);
+        Task<DnsReplicationReportDto?> GetReplicationsAsync(DnsXrayFilterRequest filter);
+        Task<List<RecordDto>?> GetCleanupCandidatesAsync(DnsXrayFilterRequest filter);
+        Task<CountDto?> GetCleanupCandidatesCountAsync(DnsXrayFilterRequest filter);
+        Task<DashboardSummaryDto?> GetDashboardSummaryAsync(DnsXrayFilterRequest filter);
     }
 }

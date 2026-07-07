@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -14,5 +14,6 @@ namespace ForestIQ.Domain.DTO
         public string? targetDc { get; set; }
         public string? forest { get; set; }
         public string? health { get; set; }
+        public string? dnsServer { get; set; }
     }
 }

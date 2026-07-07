@@ -28,7 +28,7 @@ namespace ForestIQ.Infrastructure.Data
         public async Task<List<RefreshHistory>> GetHistoryAsync(SectionName sectionName)
         {
             var latestIdsQuery = _context.RefreshHistories
-                .Where(r => r.SectionName == sectionName && r.DiscoverID != null)
+                .Where(r => r.SectionName == sectionName && r.DiscoverID != null && r.JsonData != null)
                 .GroupBy(r => r.DiscoverID)
                 .Select(g => g.OrderByDescending(x => x.RefreshTime).Select(x => x.Id).FirstOrDefault());
 

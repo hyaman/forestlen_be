@@ -1,21 +1,45 @@
 Import-Module DnsServer -ErrorAction Stop
 
-$DuplicateResults = @()
+$username = if ($global:RemoteDomain) { "$global:RemoteDomain\$global:RemoteUsername" } else { $global:RemoteUsername }
+if (-not [string]::IsNullOrWhiteSpace($username) -and -not [string]::IsNullOrWhiteSpace($global:RemotePassword)) {
+    $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Force
+    $Credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
+}
 
+$HelpersContent = ""
+foreach ($func in @('Get-RecordDataValue', 'Get-RecordAgeDays', 'Get-RecordAgeStatus', 'Test-DnsNameExistsInInventory')) {
+    if (Get-Command $func -ErrorAction SilentlyContinue) {
+        $HelpersContent += "function $func { $((Get-Command $func).Definition) }`n"
+    }
+}
+
+$ScriptBlockStr = 'param($ZoneName)' + "`n" + $HelpersContent + "`n" + @'
+
+$Server = $env:COMPUTERNAME
+$DuplicateResults = @()
 try {
-    $Records = Get-DnsServerResourceRecord -ComputerName $DnsServer -ZoneName $ZoneName -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($ZoneName) -or $ZoneName -eq 'All') {
+        $Zones = Get-DnsServerZone -ErrorAction Stop
+    } else {
+        $Zones = @(Get-DnsServerZone -ZoneName $ZoneName -ErrorAction Stop)
+    }
 
     $DnsInventory = @()
-    foreach ($Record in $Records) {
-        $RecordData = Get-RecordDataValue -Record $Record
-        if ($Record.HostName -eq "@") { $FQDN = $ZoneName } else { $FQDN = "$($Record.HostName).$($ZoneName)" }
+    foreach ($Zone in $Zones) {
+        $CurrentZoneName = $Zone.ZoneName
+        $Records = Get-DnsServerResourceRecord -ZoneName $CurrentZoneName -ErrorAction SilentlyContinue
 
-        $DnsInventory += [PSCustomObject]@{
-            DnsServer  = $DnsServer
-            ZoneName   = $ZoneName
-            FQDN       = $FQDN
-            RecordType = $Record.RecordType
-            RecordData = $RecordData
+        foreach ($Record in $Records) {
+            $RecordData = Get-RecordDataValue -Record $Record
+            if ($Record.HostName -eq "@") { $FQDN = $CurrentZoneName } else { $FQDN = "$($Record.HostName).$($CurrentZoneName)" }
+
+            $DnsInventory += [PSCustomObject]@{
+                DnsServer  = $Server
+                ZoneName   = $CurrentZoneName
+                FQDN       = $FQDN
+                RecordType = $Record.RecordType
+                RecordData = $RecordData
+            }
         }
     }
 
@@ -58,13 +82,41 @@ try {
             }
         }
     }
+} catch {
+    # Silently skip errors
+}
+return $DuplicateResults
+'@
 
-    if ($DuplicateResults.Count -eq 0) {
-        @() | Write-Output
-    } else {
-        $DuplicateResults | Write-Output
+$ScriptBlock = [scriptblock]::Create($ScriptBlockStr)
+
+$InvokeErrors = $null
+$remoteResults = Invoke-Command -ComputerName $DnsServer -Credential $Credential -ArgumentList $ZoneName -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ScriptBlock $ScriptBlock
+
+$FinalResults = @()
+if ($remoteResults) {
+    foreach ($res in $remoteResults) {
+        $FinalResults += [PSCustomObject]@{
+            DuplicateType  = $res.DuplicateType
+            DnsServer      = $res.DnsServer
+            ZoneName       = $res.ZoneName
+            FQDN           = $res.FQDN
+            RecordType     = $res.RecordType
+            RecordData     = $res.RecordData
+            Count          = $res.Count
+            Recommendation = $res.Recommendation
+        }
     }
 }
-catch {
-    throw $_
+
+if (-not [string]::IsNullOrWhiteSpace($HealthFilter) -and $HealthFilter -ne 'All') {
+    if ($HealthFilter -ne 'Warning') {
+        $FinalResults = @()
+    }
+}
+
+if ($FinalResults.Count -eq 0) {
+    @() | Write-Output
+} else {
+    $FinalResults | Write-Output
 }

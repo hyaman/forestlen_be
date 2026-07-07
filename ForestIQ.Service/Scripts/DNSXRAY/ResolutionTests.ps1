@@ -1,9 +1,22 @@
 
 
+$username = if ($global:RemoteDomain) { "$global:RemoteDomain\$global:RemoteUsername" } else { $global:RemoteUsername }
+if (-not [string]::IsNullOrWhiteSpace($username) -and -not [string]::IsNullOrWhiteSpace($global:RemotePassword)) {
+    $securePassword = ConvertTo-SecureString $global:RemotePassword -AsPlainText -Force
+    $Credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
+}
+
 $ResolutionTests = @()
 
 try {
-    $Forest = Get-ADForest -ErrorAction Stop
+    $ADParams = @{}
+    if ($Credential) {
+        $ADParams.Credential = $Credential
+        if ($global:RemoteDomain) {
+            $ADParams.Server = $global:RemoteDomain
+        }
+    }
+    $Forest = Get-ADForest @ADParams -ErrorAction Stop
     $TestNames = @(
         $Forest.Name,
         "_ldap._tcp.dc._msdcs.$($Forest.Name)",
@@ -40,6 +53,16 @@ try {
         }
     }
     
+    if (-not [string]::IsNullOrWhiteSpace($HealthFilter) -and $HealthFilter -ne 'All') {
+        if ($HealthFilter -eq 'Healthy') {
+            $ResolutionTests = $ResolutionTests | Where-Object { $_.Status -eq 'Passed' }
+        } elseif ($HealthFilter -eq 'Critical') {
+            $ResolutionTests = $ResolutionTests | Where-Object { $_.Status -eq 'Failed' }
+        } else {
+            $ResolutionTests = @()
+        }
+    }
+
     if ($ResolutionTests.Count -eq 0) {
         @() | Write-Output
     } else {
