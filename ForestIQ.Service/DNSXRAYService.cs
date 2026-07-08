@@ -120,7 +120,7 @@ namespace ForestIQ.Service
         public async Task<List<ZoneDto>?> GetZonesAsync(DnsXrayFilterRequest filter)
         {
             string dnsServer = filter.DnsServer ?? "All";
-            string cacheKey = $"DNSXRAY_Zones_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{dnsServer}";
+            string cacheKey = $"DNSXRAY_Zones_{dnsServer}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<ZoneDto>? cachedData))
             {
@@ -140,6 +140,9 @@ namespace ForestIQ.Service
 
         public async Task<List<RecordDto>?> GetRecordsAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_Records_{filter.DnsServer}_{filter.ZoneName}_{filter.StaleRecordDays}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<RecordDto>? cachedData))
@@ -160,6 +163,9 @@ namespace ForestIQ.Service
 
         public async Task<List<RecordStatisticDto>?> GetRecordStatisticsAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_RecordStatistics_{filter.DnsServer}_{filter.ZoneName}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<RecordStatisticDto>? cachedData))
@@ -180,6 +186,9 @@ namespace ForestIQ.Service
 
         public async Task<List<DuplicateRecordDto>?> GetDuplicateRecordsAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_DuplicateRecords_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<DuplicateRecordDto>? cachedData))
@@ -200,6 +209,9 @@ namespace ForestIQ.Service
 
         public async Task<List<IntegrityFindingDto>?> GetRecordIntegrityAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_RecordIntegrity_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<IntegrityFindingDto>? cachedData))
@@ -220,6 +232,9 @@ namespace ForestIQ.Service
 
         public async Task<List<BestPracticeCheckDto>?> GetBestPracticesAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_BestPractices_{filter.DnsServer}_{filter.ZoneName}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<BestPracticeCheckDto>? cachedData))
@@ -260,6 +275,9 @@ namespace ForestIQ.Service
 
         public async Task<List<ResolutionTestDto>?> GetResolutionTestsAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_ResolutionTests_{filter.DnsServer}_{filter.Health}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<ResolutionTestDto>? cachedData))
@@ -280,7 +298,7 @@ namespace ForestIQ.Service
 
         public async Task<DnsReplicationReportDto?> GetReplicationsAsync(DnsXrayFilterRequest filter)
         {
-            string cacheKey = $"DNSXRAY_Replications_{filter.DnsServer}_{filter.TargetDc}_{filter.Forest}_{filter.Domain}_{filter.Site}_{filter.Health}";
+            string cacheKey = $"DNSXRAY_Replications_{filter.DnsServer}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out DnsReplicationReportDto? cachedData))
             {
@@ -299,6 +317,9 @@ namespace ForestIQ.Service
         }
         public async Task<List<RecordDto>?> GetCleanupCandidatesAsync(DnsXrayFilterRequest filter)
         {
+            if (string.IsNullOrWhiteSpace(filter.DnsServer))
+                throw new ArgumentException("DnsServer is required.");
+
             string cacheKey = $"DNSXRAY_CleanupCandidates_{filter.DnsServer}_{filter.ZoneName}_{filter.StaleRecordDays}";
 
             if (!filter.RefreshView && _memoryCache.TryGetValue(cacheKey, out List<RecordDto>? cachedData))
@@ -306,7 +327,7 @@ namespace ForestIQ.Service
                 return cachedData;
             }
 
-            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$StaleRecordDays = {filter.StaleRecordDays}\n$CountOnly = $false";
+            var vars = $"$DnsServer = '{filter.DnsServer}'\n$ZoneName = '{filter.ZoneName}'\n$StaleRecordDays = {filter.StaleRecordDays ?? filter.StaleCleanupRecordDays}\n$CountOnly = $false";
             var result = await ExecuteAndDeserializeAsync<List<RecordDto>>("CleanupCandidates.ps1", vars);
 
             if (result != null)

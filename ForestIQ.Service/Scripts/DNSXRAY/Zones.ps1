@@ -1,6 +1,6 @@
 
 
-$ZoneInventory = @()
+
 
 $username = if ($global:RemoteDomain) { "$global:RemoteDomain\$global:RemoteUsername" } else { $global:RemoteUsername }
 if (-not [string]::IsNullOrWhiteSpace($username) -and -not [string]::IsNullOrWhiteSpace($global:RemotePassword)) {
@@ -37,11 +37,7 @@ try {
                 $DCs = $DCs | Where-Object { $_.HostName -eq $TargetDC -or $_.Name -eq $TargetDC }
             }
 
-            foreach ($DC in $DCs) {
-                if ($TargetServers -notcontains $DC.HostName) {
-                    $TargetServers += $DC.HostName
-                }
-            }
+            $TargetServers += $DCs.Where({ $null -ne $_.HostName }).HostName
         }
     } else {
         $TargetServers += $DnsServer
@@ -53,11 +49,11 @@ try {
         $InvokeErrors = $null
         $remoteResults = Invoke-Command -ComputerName $TargetServers -Credential $Credential -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ScriptBlock {
             $Server = $env:COMPUTERNAME
-            $LocalInventory = @()
+            $LocalInventory = [System.Collections.Generic.List[PSCustomObject]]::new()
             try {
                 $Zones = Get-DnsServerZone -ErrorAction Stop
                 foreach ($Zone in $Zones) {
-                    $LocalInventory += [PSCustomObject]@{
+                    $LocalInventory.Add([PSCustomObject]@{
                         DnsServer           = $Server
                         ZoneName            = $Zone.ZoneName
                         ZoneType            = $Zone.ZoneType
@@ -68,37 +64,31 @@ try {
                         SecureSecondaries   = $Zone.SecureSecondaries
                         IsPaused            = $Zone.IsPaused
                         IsShutdown          = $Zone.IsShutdown
-                    }
+                    })
                 }
             } catch {
                 # Silently skip servers we can't query
             }
-            return $LocalInventory
-        }
-
-        if ($remoteResults) {
-            foreach ($res in $remoteResults) {
-                $ZoneInventory += [PSCustomObject]@{
-                    DnsServer           = $res.DnsServer
-                    ZoneName            = $res.ZoneName
-                    ZoneType            = $res.ZoneType
-                    IsDsIntegrated      = $res.IsDsIntegrated
-                    ReplicationScope    = $res.ReplicationScope
-                    IsReverseLookupZone = $res.IsReverseLookupZone
-                    DynamicUpdate       = $res.DynamicUpdate
-                    SecureSecondaries   = $res.SecureSecondaries
-                    IsPaused            = $res.IsPaused
-                    IsShutdown          = $res.IsShutdown
-                }
+            if ($LocalInventory.Count -gt 0) {
+                return ($LocalInventory | ConvertTo-Json -Depth 5 -Compress)
             }
         }
+
+        $ZoneInventory = if ($remoteResults) {
+            foreach ($resStr in $remoteResults) {
+                $parsed = $resStr | ConvertFrom-Json
+                if ($null -ne $parsed) {
+                    $parsed
+                }
+            }
+        } else {
+            @()
+        }
+    } else {
+        $ZoneInventory = @()
     }
     
-    if ($ZoneInventory.Count -eq 0) {
-        @() | Write-Output
-    } else {
-        $ZoneInventory | Write-Output
-    }
+    $ZoneInventory | Write-Output
 }
 catch {
     throw $_

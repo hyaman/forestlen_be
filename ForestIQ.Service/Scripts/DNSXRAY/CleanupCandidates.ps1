@@ -15,10 +15,9 @@ foreach ($func in @('Get-RecordDataValue', 'Get-RecordAgeDays', 'Get-RecordAgeSt
     }
 }
 
-$ScriptBlockStr = 'param($ZoneName, $StaleRecordDays)' + "`n" + $HelpersContent + "`n" + @'
+$ScriptBlockStr = 'param($ZoneName, $StaleRecordDays, $CountOnly, $DnsServerName)' + "`n" + $HelpersContent + "`n" + @'
 
-$Server = $env:COMPUTERNAME
-$LocalInventory = @()
+$LocalInventory = [System.Collections.Generic.List[PSCustomObject]]::new()
 try {
     if ([string]::IsNullOrWhiteSpace($ZoneName) -or $ZoneName -eq 'All') {
         $Zones = @(Get-DnsServerZone -ErrorAction SilentlyContinue)
@@ -35,68 +34,72 @@ try {
             $AgeStatus = Get-RecordAgeStatus -Timestamp $Record.Timestamp -StaleDays $StaleRecordDays
             $AgeDays = Get-RecordAgeDays -Timestamp $Record.Timestamp
 
-            if ($AgeDays -ne $null -and $AgeDays -gt $StaleRecordDays) {
+            if ($AgeDays -ne $null) {
                 if ($Record.HostName -eq "@") {
                     $FQDN = $CurrentZoneName
                 } else {
                     $FQDN = "$($Record.HostName).$($CurrentZoneName)"
                 }
 
-                $LocalInventory += [PSCustomObject]@{
-                    DnsServer        = $Server
-                    ZoneName         = $CurrentZoneName
-                    ZoneType         = $Zone.ZoneType
-                    IsDsIntegrated   = $Zone.IsDsIntegrated
-                    ReplicationScope = $Zone.ReplicationScope
-                    RecordName       = $Record.HostName
-                    FQDN             = $FQDN
-                    RecordType       = $Record.RecordType
-                    RecordData       = $RecordData
-                    Timestamp        = $Record.Timestamp
-                    AgeDays          = $AgeDays
-                    AgeStatus        = $AgeStatus
-                    TTL              = $Record.TimeToLive.TotalSeconds
+                if ($AgeDays -ge $StaleRecordDays) {
+                    $LocalInventory.Add([PSCustomObject]@{
+                        DnsServer        = $DnsServerName
+                        ZoneName         = $CurrentZoneName
+                        ZoneType         = $Zone.ZoneType
+                        IsDsIntegrated   = $Zone.IsDsIntegrated
+                        ReplicationScope = $Zone.ReplicationScope
+                        RecordName       = $Record.HostName
+                        FQDN             = $FQDN
+                        RecordType       = $Record.RecordType
+                        RecordData       = $RecordData
+                        Timestamp        = $Record.Timestamp
+                        AgeDays          = $AgeDays
+                        AgeStatus        = $AgeStatus
+                        TTL              = $Record.TimeToLive.TotalSeconds
+                    })
                 }
             }
         }
     }
+    
+    if ($CountOnly -eq $true) {
+        return @{ Count = $LocalInventory.Count } | ConvertTo-Json -Compress
+    }
+    
+    if ($LocalInventory.Count -gt 0) {
+        return ($LocalInventory | ConvertTo-Json -Depth 5 -Compress)
+    }
 } catch {
     # Silently skip
 }
-return $LocalInventory
 '@
 
 $ScriptBlock = [scriptblock]::Create($ScriptBlockStr)
 
 $InvokeErrors = $null
-$remoteResults = Invoke-Command -ComputerName $DnsServer -Credential $Credential -ArgumentList $ZoneName, $StaleRecordDays -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ScriptBlock $ScriptBlock
+$remoteResults = Invoke-Command -ComputerName $DnsServer -Credential $Credential -ErrorAction SilentlyContinue -ErrorVariable InvokeErrors -ArgumentList $ZoneName, $StaleRecordDays, $CountOnly, $DnsServer -ScriptBlock $ScriptBlock
 
-if ($remoteResults) {
-    foreach ($res in $remoteResults) {
-        $DnsInventory += [PSCustomObject]@{
-            DnsServer        = $res.DnsServer
-            ZoneName         = $res.ZoneName
-            ZoneType         = $res.ZoneType
-            IsDsIntegrated   = $res.IsDsIntegrated
-            ReplicationScope = $res.ReplicationScope
-            RecordName       = $res.RecordName
-            FQDN             = $res.FQDN
-            RecordType       = $res.RecordType
-            RecordData       = $res.RecordData
-            Timestamp        = $res.Timestamp
-            AgeDays          = $res.AgeDays
-            AgeStatus        = $res.AgeStatus
-            TTL              = $res.TTL
+if ($CountOnly) {
+    if ($remoteResults) {
+        $parsed = $remoteResults | ConvertFrom-Json
+        if ($null -ne $parsed -and $null -ne $parsed.Count) {
+            [PSCustomObject]@{ Count = $parsed.Count } | Write-Output
+        } else {
+            [PSCustomObject]@{ Count = 0 } | Write-Output
         }
-    }
-}
-
-if ($CountOnly -eq $true) {
-    [PSCustomObject]@{ Count = $DnsInventory.Count } | Write-Output
-} else {
-    if ($DnsInventory.Count -eq 0) {
-        @() | Write-Output
     } else {
-        $DnsInventory | Write-Output
+        [PSCustomObject]@{ Count = 0 } | Write-Output
     }
+} else {
+    $DnsInventory = if ($remoteResults) {
+        foreach ($resStr in $remoteResults) {
+            $parsed = $resStr | ConvertFrom-Json
+            if ($null -ne $parsed) {
+                $parsed
+            }
+        }
+    } else {
+        @()
+    }
+    $DnsInventory | Write-Output
 }

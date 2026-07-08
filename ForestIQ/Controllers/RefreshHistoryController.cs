@@ -77,7 +77,7 @@ namespace ForestIQ.Controllers
 
         [AllowAnonymous]
         [HttpPost("check-cache")]
-        public IActionResult CheckCache(CheckCacheRequest checkCacheRequest)
+        public async Task<IActionResult> CheckCache(CheckCacheRequest checkCacheRequest)
         {
             if (string.IsNullOrEmpty(checkCacheRequest.section))
             {
@@ -122,18 +122,14 @@ namespace ForestIQ.Controllers
             else if (sec == SectionName.DeepDnsHealth)
             {
                 string dnsSrv = string.IsNullOrEmpty(checkCacheRequest.dnsServer) ? "All" : checkCacheRequest.dnsServer;
-                string tDc = string.IsNullOrEmpty(checkCacheRequest.targetDc) ? "All" : checkCacheRequest.targetDc;
-                string f = string.IsNullOrEmpty(checkCacheRequest.forest) ? "All" : checkCacheRequest.forest;
-                string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "All" : checkCacheRequest.domain;
-                string s = string.IsNullOrEmpty(checkCacheRequest.site) ? "All" : checkCacheRequest.site;
-                string h = string.IsNullOrEmpty(checkCacheRequest.health) ? "All" : checkCacheRequest.health;
-
-                string cacheKey = $"DNSXRAY_Replications_{dnsSrv}_{tDc}_{f}_{d}_{s}_{h}";
+                
+                string cacheKey = $"DNSXRAY_Replications_{dnsSrv}";
+                
                 cacheExists = _memoryCache.TryGetValue(cacheKey, out _);
 
                 if (!cacheExists)
                 {
-                    cacheExists = _memoryCache.TryGetValue("DNSXRAY_Replications_All_All_All_All_All_All", out _);
+                    cacheExists = _memoryCache.TryGetValue("DNSXRAY_Replications_All_All_All", out _);
                 }
             }
 

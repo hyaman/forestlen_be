@@ -86,7 +86,9 @@ namespace ForestIQ.Infrastructure.Data
 
             if (!string.IsNullOrEmpty(Dcname))
             {
-                query = query.Where(r => r.DCName == Dcname);
+                var dcNameLower = Dcname.ToLower();
+
+                query = query.Where(r => r.DCName != null && r.DCName.ToLower() == dcNameLower);
             }
 
             return await query
