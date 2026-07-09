@@ -13,6 +13,9 @@ namespace ForestIQ.Domain.Enums
         DeepDcDiscovery,
 
         [EnumMember(Value = "deep-dns-health")]
-        DeepDnsHealth
+        DeepDnsHealth,
+
+        [EnumMember(Value = "identity-xray")]
+        IdentityXRay
     }
 }

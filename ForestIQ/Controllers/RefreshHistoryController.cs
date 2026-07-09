@@ -132,6 +132,18 @@ namespace ForestIQ.Controllers
                     cacheExists = _memoryCache.TryGetValue("DNSXRAY_Replications_All_All_All", out _);
                 }
             }
+            else if (sec == SectionName.IdentityXRay)
+            {
+                string d = string.IsNullOrEmpty(checkCacheRequest.domain) ? "All" : checkCacheRequest.domain;
+                string cacheKey = $"IdentityXRay_DomainPosture_{d}_False";
+                
+                cacheExists = _memoryCache.TryGetValue(cacheKey, out _);
+
+                if (!cacheExists)
+                {
+                    cacheExists = _memoryCache.TryGetValue("IdentityXRay_DomainPosture_All_False", out _);
+                }
+            }
 
             return Ok(ApiResponse<bool>.Ok(cacheExists));
         }
