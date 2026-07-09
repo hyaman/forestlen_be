@@ -1,3 +1,5 @@
+using System;
+
 namespace ForestIQ.Domain.DTO
 {
     public class DashboardFilterRequest
@@ -11,5 +13,7 @@ namespace ForestIQ.Domain.DTO
 
         // Specific to auth-summary, defaults to 24
         public int LookBackHours { get; set; } = 24;
+
+        public Guid? DiscoverId { get; set; }
     }
 }

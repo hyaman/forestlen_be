@@ -19,7 +19,7 @@ $dcs = @()
 try { 
     $forest = Get-ADForest -Credential $cred
     foreach ($domain in $forest.Domains) {
-        if ($global:FilterDomain -and ($domain -notmatch $global:FilterDomain)) { continue }
+        if ($global:FilterDomain -and ($domain -ne $global:FilterDomain)) { continue }
         try {
             $domainDCs = @(Get-ADDomainController -Filter * -Server $domain -Credential $cred -ErrorAction Stop | Select-Object HostName, Site, IPv4Address, Domain)
             if ($global:FilterSite) { $domainDCs = @($domainDCs | Where-Object { $_.Site -match $global:FilterSite }) }
@@ -28,6 +28,9 @@ try {
     }
 }
 catch { $report.Errors += [pscustomobject]@{ Section = 'DomainControllers'; Error = $_.Exception.Message }; return $report }
+
+$dcShortNames = @($dcs | ForEach-Object { $_.HostName -replace '\..*','' })
+$dcHostNames = @($dcs | Select-Object -ExpandProperty HostName)
 
 $t0 = Get-Date
 try
@@ -202,6 +205,12 @@ try
             $transportProtocol = $conn.InterSiteTransportProtocol
         }
 
+        if ($global:FilterDomain) {
+            if (($dcShortNames -notcontains $sourceDC) -and ($dcShortNames -notcontains $targetDC) -and ($dcHostNames -notcontains $sourceDC) -and ($dcHostNames -notcontains $targetDC)) {
+                continue
+            }
+        }
+
         $replicationConnections.Add([pscustomobject]@{
             ConnectionName                    = $conn.Name
             SourceDC                          = $sourceDC
@@ -248,7 +257,10 @@ try
 
         if ($trimmed -match '^(\S+)\s+(\S+)\s+(\d+)\s*/\s*(\d+)\s+(\d+)\s*(.*)$')
         {
-            $item = [pscustomobject]@{ Server = $Matches[1]; LargestDelta = $Matches[2]; Failures = [int]$Matches[3]; Total = [int]$Matches[4]; FailurePercent = [int]$Matches[5]; Error = $Matches[6].Trim() }
+            $serverName = $Matches[1]
+            if ($global:FilterDomain -and ($dcShortNames -notcontains $serverName) -and ($dcHostNames -notcontains $serverName)) { continue }
+
+            $item = [pscustomobject]@{ Server = $serverName; LargestDelta = $Matches[2]; Failures = [int]$Matches[3]; Total = [int]$Matches[4]; FailurePercent = [int]$Matches[5]; Error = $Matches[6].Trim() }
             if ($currentSection -eq 'Source') { $sourceDSA.Add($item) } elseif ($currentSection -eq 'Destination') { $destinationDSA.Add($item) }
             continue
         }

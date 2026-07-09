@@ -89,6 +89,44 @@ namespace ForestIQ.Infrastructure.Data.Migrations
                     b.ToTable("PerformanceHistory");
                 });
 
+            modelBuilder.Entity("ForestIQ.Domain.DTO.JobConfiguration", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CronExpression")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastModified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RetentionDays")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobName")
+                        .IsUnique();
+
+                    b.ToTable("JobConfigurations");
+                });
+
             modelBuilder.Entity("ForestIQ.Domain.DTO.RefreshHistory", b =>
                 {
                     b.Property<int>("Id")
@@ -96,6 +134,15 @@ namespace ForestIQ.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DCName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DiscoverID")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JsonData")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("RefreshTime")

@@ -5,8 +5,10 @@ using Hangfire;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ForestIQ.Domain;
 
 namespace ForestIQ.Service.Jobs
 {
@@ -63,6 +65,9 @@ namespace ForestIQ.Service.Jobs
                         return;
                     }
 
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var liveStatsList = new System.Collections.Generic.List<DcPerformanceLiveModel>();
+
                     // Deserialize single result or array
                     var doc = JsonDocument.Parse(jsonResult);
                     if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
@@ -70,18 +75,48 @@ namespace ForestIQ.Service.Jobs
                         foreach(var element in doc.RootElement.EnumerateArray())
                         {
                             await ProcessAndSaveElement(element, historyRepository);
+
+                            var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(element.GetRawText(), options);
+                            if (liveStats != null)
+                            {
+                                liveStatsList.Add(liveStats);
+                            }
                         }
                     }
                     else if (doc.RootElement.ValueKind == JsonValueKind.Object)
                     {
                         await ProcessAndSaveElement(doc.RootElement, historyRepository);
+
+                        var liveStats = JsonSerializer.Deserialize<DcPerformanceLiveModel>(doc.RootElement.GetRawText(), options);
+                        if (liveStats != null)
+                        {
+                            liveStatsList.Add(liveStats);
+                        }
+                    }
+
+                    if (liveStatsList.Count > 0)
+                    {
+                        var cache = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+                        
+                        // Clear existing cache for 'All' before adding the new one
+                        cache.Remove("Dashboard_Performance_All");
+                        cache.Set("Dashboard_Performance_All", liveStatsList, TimeSpan.FromMinutes(15));
+                        
+                        // Cache for specific DCs
+                        foreach (var stat in liveStatsList)
+                        {
+                            if (!string.IsNullOrEmpty(stat.ServerName))
+                            {
+                                string cacheKey = $"Dashboard_Performance_{stat.ServerName}";
+                                cache.Remove(cacheKey); // Clear existing cache first
+                                cache.Set(cacheKey, new System.Collections.Generic.List<DcPerformanceLiveModel> { stat }, TimeSpan.FromMinutes(Runtime.Cache.DashboardCacheMinutes));
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error occurred during Performance Polling Job.");
-                    // We intentionally swallow the exception so Hangfire marks the job as Succeeded
-                    // and doesn't aggressively retry it. It will run again at the next 15-minute interval.
                 }
             }
             

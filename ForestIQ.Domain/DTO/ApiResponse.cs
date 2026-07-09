@@ -12,5 +12,6 @@ namespace ForestIQ.Domain.DTO
 
         public static ApiResponse<T> Fail(string message, int statusCode = 500) 
             => new ApiResponse<T> { Data = default, Success = false, StatusCode = statusCode, Message = message };
+
     }
 }

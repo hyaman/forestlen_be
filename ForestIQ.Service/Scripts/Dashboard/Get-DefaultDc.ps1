@@ -8,10 +8,15 @@ Import-Module ActiveDirectory -ErrorAction SilentlyContinue
 try {
     # If no target domain is provided, try to determine the current domain
     if ([string]::IsNullOrEmpty($TargetDomain) -or $TargetDomain -eq "All") {
-        $TargetDomain = (Get-ADDomain -Credential $cred).Name
+        if ($global:RemoteDomain) {
+            $TargetDomain = (Get-ADDomain -Server $global:RemoteDomain -Credential $cred).Name
+        }
+        else {
+            $TargetDomain = (Get-ADDomain -Credential $cred).Name
+        }
     }
 
-    $forest = Get-ADForest -Credential $cred -ErrorAction Stop
+    $forest = Get-ADForest -Server $TargetDomain -Credential $cred -ErrorAction Stop
     $domainNamingMaster = $forest.DomainNamingMaster
 
     $targetDcName = ""
@@ -19,7 +24,7 @@ try {
     # Check all domains in the forest using standard loop (fast AD query)
     foreach ($domainName in $forest.Domains) {
         try {
-            $domain = Get-ADDomain -Identity $domainName -Credential $cred -ErrorAction Stop
+            $domain = Get-ADDomain -Identity $domainName -Server $domainName -Credential $cred -ErrorAction Stop
             if ($domain.InfrastructureMaster -eq $domainNamingMaster) {
                 $targetDcName = $domainNamingMaster
                 break
@@ -29,11 +34,17 @@ try {
     }
 
     if ([string]::IsNullOrWhiteSpace($targetDcName)) {
-        $targetDcName = $env:COMPUTERNAME
+        $domainInfo = Get-ADDomain -Identity $TargetDomain -Server $TargetDomain -Credential $cred -ErrorAction SilentlyContinue
+        if (-not [string]::IsNullOrWhiteSpace($domainInfo.PDCEmulator)) {
+            $targetDcName = $domainInfo.PDCEmulator
+        }
+        else {
+            $targetDcName = (Get-ADDomainController -DomainName $TargetDomain -Discover -Credential $cred -ErrorAction Stop).HostName
+        }
     }
 
     # Get details of the selected DC
-    $dcInfo = Get-ADDomainController -Identity $targetDcName -Credential $cred -ErrorAction Stop
+    $dcInfo = Get-ADDomainController -Identity $targetDcName -Server $targetDcName -Credential $cred -ErrorAction Stop
 
     $result = [PSCustomObject]@{
         ServerName      = $dcInfo.Name

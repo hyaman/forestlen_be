@@ -25,6 +25,10 @@ namespace ForestIQ.Extensions
             services.AddScoped<IPerformanceHistoryRepository, PerformanceHistoryRepository>();
             services.AddScoped<IRefreshHistoryRepository, RefreshHistoryRepository>();
             services.AddScoped<IRefreshHistoryService, RefreshHistoryService>();
+            services.AddScoped<IDNSXRAYService, DNSXRAYService>();
+            services.AddScoped<IJobConfigurationRepository, JobConfigurationRepository>();
+            services.AddScoped<IJobConfigurationService, JobConfigurationService>();
+            services.AddSingleton<IJobSchedulerService, JobSchedulerService>();
 
             services.AddScoped<ForestIQ.Domain.Interface.Licensing.IRsaHelper, ForestIQ.Service.Licensing.RsaHelper>();
             services.AddScoped<ForestIQ.Domain.Interface.Licensing.ILicenseGenerator, ForestIQ.Service.Licensing.LicenseGenerator>();

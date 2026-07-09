@@ -10,5 +10,8 @@ namespace ForestIQ.Domain.DTO
         public DateTime RefreshTime { get; set; }
         public string? TriggeredBy { get; set; }
         public DateTime CreatedAt { get; set; }
+        public string? JsonData { get; set; }
+        public Guid? DiscoverID { get; set; }
+        public string? DCName { get; set; } 
     }
 }
